@@ -1,6 +1,9 @@
 import anthropic
 import os
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 GOODTAPE_API_KEY = os.environ["GOODTAPE_API_KEY"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
