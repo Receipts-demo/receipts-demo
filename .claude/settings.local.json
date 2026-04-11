@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(gh auth:*)",
+      "Bash(/opt/homebrew/bin/gh repo:*)",
+      "Bash(echo \"exit: $?\")"
+    ]
+  }
+}
