@@ -40,9 +40,9 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const contentType = req.headers.get("content-type") ?? "audio/webm";
   const form = new FormData();
-  form.append("audio", new Blob([audioBytes], { type: contentType }), "audio");
+  form.append("audio", new Blob([audioBytes], { type: "audio/wav" }), "recording.wav");
+  form.append("languageCode", "en");
 
   const goodTapeRes = await fetch("https://api.goodtape.io/transcribe/sync", {
     method: "POST",
