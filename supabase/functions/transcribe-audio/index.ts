@@ -47,7 +47,7 @@ Deno.serve(async (req: Request) => {
   const goodTapeRes = await fetch("https://api.goodtape.io/transcribe/sync", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: apiKey,
     },
     body: form,
   });
