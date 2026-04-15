@@ -45,6 +45,14 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  const wordCount = transcript.trim().split(/\s+/).filter(Boolean).length;
+  if (wordCount < 10) {
+    return new Response(JSON.stringify({ skip: true }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const userMessage = tool_tags.length > 0
     ? `${transcript}\n\nTool tags: ${tool_tags.join(", ")}`
     : transcript;
