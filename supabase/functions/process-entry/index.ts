@@ -60,7 +60,7 @@ Deno.serve(async (req: Request) => {
       model: "claude-sonnet-4-20250514",
       max_tokens: 200,
       system:
-        "You are a professional build logger. Take this raw note and turn it into a single precise claim statement - one sentence describing what was built, decided, or originated, written as professional evidence. Return only the claim, nothing else. Respond in the same language as the input transcript. If the transcript is in German, write the claim in German. If in English, write in English.",
+        "You are a professional build logger. Take this raw note and turn it into a single precise claim statement - one sentence describing what was built, decided, or originated, written as professional evidence. Return only the claim, nothing else. Respond in the same language as the input transcript. If the transcript is in German, write the claim in German. If in English, write in English. If the input is too short, is a greeting, or does not contain enough information to generate a meaningful build claim, return a gentle fallback instead: in English return 'A note was logged.' and in German return 'Eine Notiz wurde gespeichert.' Never return phrases like 'I cannot create' or 'I cannot generate' — always return a short, neutral claim.",
       messages: [{ role: "user", content: userMessage }],
     }),
   });
