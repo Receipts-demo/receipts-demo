@@ -1,0 +1,210 @@
+# Receipts - CLAUDE.md
+
+## What is Receipts
+GitHub for non-coders. Voice note in, timestamped AI-structured claim out.
+Captures the thinking, decisions and proof of work behind what non-technical
+people build with AI. Individual proof of work + team collaboration +
+org oversight.
+
+Live at: https://get-receipts.lovable.app
+Lovable project: ec5b807e-7f38-4789-a7af-facfaf52224a
+GitHub (backend/SQL): https://github.com/Receipts-demo/receipts-demo
+GitHub (React frontend): https://github.com/Receipts-demo/get-receipts
+Supabase project: kxkynhbulfxkibwmwrwl (Central EU)
+
+## Current Tech Stack
+- Frontend: Lovable (React/TypeScript)
+- Backend: Supabase (Postgres)
+- Voice: Web Speech API (browser native)
+- AI claim generation: Claude Sonnet via Supabase edge function (process-entry)
+- Transcription roadmap: Good Tape API (GDPR compliant)
+- Auth: Supabase Auth email/password — COMPLETE (April 15 2026)
+
+## Current State (April 15 2026)
+Working features:
+- Landing page with waitlist (emails saved to Supabase)
+- Voice recording via Web Speech API → Claude generates claim → saves to Supabase
+- Five starter prompts: Today I built / Today I learnt / Today I solved /
+  One problem was / Next I will
+- Sequential prompt pulsing after each entry save
+- My Projects page with mock project timelines (Sales Coach, GTM Agent,
+  Weekly Brief)
+- Collaborate page with team feed, CEO stats bar, voice search
+- Real auth via Supabase Auth (email/password) — LIVE as of April 15 2026
+  - Signup and login pages at /signup and /login
+  - Protected routes: /record, /log, /profile require authentication
+  - Entry inserts write owner_id = auth user id
+  - Entries filtered by owner_id so each user sees only their own data
+  - Heading shows display_name from user metadata (falls back to email prefix)
+  - Sign out button in sidebar
+  - RLS policies enforced in Supabase (entries, profiles, waitlist)
+  - Confirmation email redirect fixed (lands back in app correctly)
+- Delete entries with inline confirmation toast (Confirm / Cancel)
+- German language support — language toggle (🇬🇧 / 🇩🇪) on recording card;
+  speech recognition lang switches; Claude claims returned in German if input
+  is German
+- Short entry guard — transcripts under 10 words return skip:true from
+  process-entry edge function; frontend shows toast "Add more detail to log
+  this" and does not save to Supabase
+- Collapsible entry feed — each entry expands to show entry_type badge and
+  relative timestamp; collapses to single truncated line
+- Get in touch button linking to get.receipts.ai@gmail.com
+
+Known issues:
+- Entries not linked to each other (no session concept)
+- Tool tags rarely filled in by users - needs auto-detection
+- BuildLog (My Projects) still shows mock timeline data — needs real
+  entries from the authenticated user once projects are created
+
+## Supabase Schema
+Table: entries
+- id (uuid)
+- owner_id (uuid, nullable)
+- project_id (uuid, nullable)
+- recorded_at (timestamptz)
+- raw_transcript (text)
+- claim (text)
+- created_at (timestamptz)
+- entry_type (text) - build/decision/idea/shipped/dropped/log
+- tool_tags (text[])
+- project_tag (text)
+- user_id (uuid, nullable)
+- transcript (text)
+- user_name (text)
+
+Table: waitlist
+- id, email, created_at
+
+Edge functions deployed:
+- process-entry (calls Claude API, generates claim)
+- transcribe-audio (Good Tape proxy - not currently used)
+
+## Auth Sprint — COMPLETE (April 15 2026)
+Goal: Real user accounts so each person has their own data
+
+Steps:
+1. ✅ Enable Supabase Auth (email/password)
+2. ✅ Add sign up / login pages (/signup, /login)
+3. ✅ Replace localStorage userName with auth user id
+4. ✅ Add owner_id to all entry inserts
+5. ✅ Filter entries by authenticated user (owner_id = auth.uid())
+6. ✅ RLS policies on entries, profiles, waitlist tables
+7. ✅ Confirmation email redirect lands back in app correctly
+8. ⬜ Update waitlist to capture auth signups (deferred to Sprint 2)
+
+Files changed (all in Receipts-demo/get-receipts):
+- src/contexts/AuthContext.tsx (new) — AuthProvider + useAuth hook
+- src/pages/Login.tsx (new)
+- src/pages/SignUp.tsx (new)
+- src/App.tsx — AuthProvider, ProtectedRoute, /login + /signup routes
+- src/pages/Dashboard.tsx — owner_id insert, filtered query, auth display name,
+  delete with confirmation toast, German language toggle, skip guard,
+  collapsible ExpandableEntry feed
+- src/pages/BuildLog.tsx — owner_id filtered query, auth display name
+- src/pages/Landing.tsx — removed name modal, Sign in → /login
+- src/components/AppSidebar.tsx — sign out button + display name
+SQL run in Supabase: supabase/migrations/20260415_auth.sql
+Edge function updated: supabase/functions/process-entry/index.ts
+  — skip:true for transcripts < 10 words
+  — German language instruction in system prompt
+
+## Current Sprint
+Sprint 2 - My Builds page with real projects
+- Projects table created in Supabase ✅
+- RLS policies set ✅
+- Building New Build creation flow in Lovable tonight
+
+## Sprint 2 - Project Experience
+Goal: Entries land somewhere meaningful, not just a feed
+
+- Project creation flow: name, one liner, goal, intended outcome
+- Goal pinned to top of project
+- Entries assigned to projects
+- Session concept: group related entries together with session_id
+- Timeline view per project showing real entries not mock data
+
+## Sprint 3 - AI Native Profile (retention + viral hook)
+Goal: Retention hook and shareable proof of work
+
+### Onboarding flow (3 steps after signup)
+Step 1: "What's your role and what do you do day to day?" - voice or text
+Step 2: "Tell me one thing you've built with AI so far" - voice or text
+Step 3: Claude analyses answers and assigns AI Native level
+
+### Levels
+1. The Curious - "You've heard about this AI thing. The rabbit hole awaits."
+2. The Prompt Whisperer - "You've figured out how you ask matters. Baby wizard."
+3. The Vibe Coder - "Building things without knowing how they work. This is fine."
+4. The Agent Architect - "Automations running while you sleep. Colleagues think you're magical."
+5. Lord of AI - "You humble LLMs bow before you. I knight thee Sir LAincelot of the
+   Agentic Realm. We are not worthy."
+
+### The reveal moment
+Full screen animation. Level badge drops. Title appears. Confetti. Voice reads title
+aloud. Share button: "I just got my AI Native level - what's yours?" → viral loop
+
+### Profile header
+Kat Whiteley
+⚔️ Vibe Coder · Level 3
+Sales · Good Tape
+
+### Progression
+Level advances based on: tools used, entry types logged, projects created, entries
+count. Claude calculates level from build log data.
+
+### Voice
+ElevenLabs for the level reveal eventually. Browser speech synthesis for now.
+
+### Still to define
+- Badges: First Receipt, Builder, Shipped, Collaborator, AI Native
+- Profile stats: builds logged, decisions made, wins recorded, projects shipped
+- Shareable profile link
+
+## Sprint 4 - Team Layer
+Goal: Collaboration that makes the org story real
+
+- Invite colleague to project
+- Shared project view with real entries (not mock)
+- Collaborate feed showing real team entries
+- Team admin view
+
+## Key Product Decisions Made
+- Web Speech API chosen over Good Tape for demo (audio format issues
+  with webm) - Good Tape is the production plan
+- localStorage for multi-user without auth - replaced by Supabase Auth (April 15 2026)
+- Lovable for UI, Claude Code for backend logic
+- Five prompt types chosen based on real user need:
+  built/learnt/solved/problem/next
+- Session grouping of entries deferred to auth sprint
+- Tool auto-detection by Claude preferred over manual tagging
+- Renamed "My Projects" to "My Builds"
+- Entry types map to grouping tabs
+- Orb speaks back on short entries (browser speech synthesis now, ElevenLabs planned Sprint 3)
+- ElevenLabs planned for Sprint 3 voice personality
+
+## ICP and Positioning
+Primary user: Sales and marketing professionals at SaaS companies
+building AI tools with no proof of work
+Buyer: Head of AI / VP Operations at SaaS companies (50-500 employees)
+Positioning: GitHub for non-coders
+Tagline: Speak what you built. Get a timestamped claim.
+Competitor gap: Notion requires manual writing. GitHub is for coders.
+Palette requires technical setup. Receipts is voice-first, zero friction.
+
+## Active Conversations (April 2026)
+- Janik Pöttinger - Zero2Demo organiser, intro to Procuros Head of Growth, demo sent
+- Henrik - Head of AI Danish Industry, warm, keep posted weekly
+- Klimate CEO - connected via Antler, potential customer
+- 25 visitors in 72 hours across 7 countries
+- 6 real external users logged entries organically
+
+## Kat's Context
+Customer Account Manager at Good Tape (Copenhagen AI transcription SaaS)
+Antler alumni. Sales background. Self-taught builder using Claude Code
+and Lovable. First time using Lovable was at Zero2Demo hackathon
+April 11-12 2026. Built Receipts solo in one day after co-builder
+fell sick. Top 10 at Zero2Demo.
+
+Good Tape is the production transcription partner for Receipts.
+Lasse (CEO), Ýmir (CTO), Silja (Marketing) are Good Tape colleagues
+who appear in mock demo data.
