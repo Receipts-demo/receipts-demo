@@ -24,14 +24,15 @@ From their answers extract:
 
 Rules:
 - If answers are too short or vague to make a confident assessment, default level to 2
+- Strong signals for Level 3+: mentions of APIs, Python, JavaScript, automation scripts, Claude Code, building actual tools, writing code, Supabase, databases. If someone has built a working tool using code or APIs they are minimum Level 3. Level 2 is for people who use AI assistants but haven't built anything technical yet.
 - Never invent or assume company names
 - Never make the user look strange on their profile card
 - Return ONLY valid JSON, no other text
 
 Return this exact JSON structure:
 {
-  "level": number,
-  "level_title": string,
+  "ai_level": number,
+  "ai_level_title": string,
   "role_category": string,
   "company_context": string | null,
   "streaming_analysis": string,
