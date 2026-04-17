@@ -15,8 +15,8 @@ Levels:
 5 - Lord of AI: AI is deeply embedded in everything they do, building at the frontier
 
 From their answers extract:
-- level (1-5 integer)
-- level_title (exact title from above)
+- ai_level (1-5 integer)
+- ai_level_title (exact title from above)
 - role_category (one of: Sales, Marketing, Operations, Product, Engineering, Design, Research, Finance, Other - extract from context, never guess)
 - company_context (company name if clearly stated, 'on the side' for side projects/spare time, 'independently' for freelance, omit entirely if unclear)
 - streaming_analysis (2-3 sentences, personal and specific to their answers, builds anticipation for the reveal - reference something concrete from what they said)
