@@ -15,24 +15,30 @@ Supabase project: kxkynhbulfxkibwmwrwl (Central EU)
 ## Current Tech Stack
 - Frontend: Lovable (React/TypeScript)
 - Backend: Supabase (Postgres)
-- Voice: Web Speech API (browser native)
+- Voice: Web Speech API (browser native) — Gladia replacing this in Sprint 4
 - AI claim generation: Claude Sonnet via Supabase edge function (process-entry)
-- Transcription roadmap: Good Tape API (GDPR compliant)
+- AI level assessment: Claude Sonnet via Supabase edge function (assess-ai-level)
+- Transcription roadmap: Gladia (replacing Web Speech API for mobile support)
 - Auth: Supabase Auth email/password — COMPLETE (April 15 2026)
 
-## Current State (April 15 2026)
+## Current State (April 18 2026)
 Working features:
 - Landing page with waitlist (emails saved to Supabase)
-- Voice recording via Web Speech API → Claude generates claim → saves to Supabase
+- Voice recording via Web Speech API → two save options:
+  - Quick save: raw transcript saved instantly as claim, skips Claude
+  - Generate claim ✨: calls process-entry edge function, Claude generates claim
 - Five starter prompts: Today I built / Today I learnt / Today I solved /
   One problem was / Next I will
 - Sequential prompt pulsing after each entry save
-- My Projects page with mock project timelines (Sales Coach, GTM Agent,
-  Weekly Brief)
-- Collaborate page with team feed, CEO stats bar, voice search
+- GlassOrb as hero on all main pages with contextual prompts
+- My Builds page (/log) with real projects from Supabase
+- Ideas tab (/ideas) with post-it card grid, auto-tagging, voice capture,
+  expand/collapse per card
+- Collaborate page at /collaborate with team feed
+- Profile page at /profile with AI Native level card, stats, recent builds
 - Real auth via Supabase Auth (email/password) — LIVE as of April 15 2026
   - Signup and login pages at /signup and /login
-  - Protected routes: /record, /log, /profile require authentication
+  - Protected routes: /record, /log, /ideas, /collaborate, /profile, /onboarding
   - Entry inserts write owner_id = auth user id
   - Entries filtered by owner_id so each user sees only their own data
   - Heading shows display_name from user metadata (falls back to email prefix)
@@ -44,17 +50,19 @@ Working features:
   speech recognition lang switches; Claude claims returned in German if input
   is German
 - Short entry guard — transcripts under 10 words return skip:true from
-  process-entry edge function; frontend shows toast "Add more detail to log
-  this" and does not save to Supabase
+  process-entry edge function; orb speaks back and does not save to Supabase
 - Collapsible entry feed — each entry expands to show entry_type badge and
   relative timestamp; collapses to single truncated line
 - Get in touch button linking to get.receipts.ai@gmail.com
+- Onboarding flow at /onboarding (4 screens: hook, Q1, Q2, reveal) with
+  confetti, animated level reveal, and profile save
+- Login.tsx checks onboarding_complete on profiles table and redirects to
+  /onboarding if false
 
 Known issues:
-- Entries not linked to each other (no session concept)
-- Tool tags rarely filled in by users - needs auto-detection
-- BuildLog (My Projects) still shows mock timeline data — needs real
-  entries from the authenticated user once projects are created
+- Web Speech API doesn't work on mobile Chrome — blocked until Gladia integration
+- No public profile URL yet — Share Profile button needs a real public route
+- Collaborate feed shows mock data only
 
 ## Supabase Schema
 Table: entries
@@ -77,6 +85,7 @@ Table: waitlist
 
 Edge functions deployed:
 - process-entry (calls Claude API, generates claim)
+- assess-ai-level (calls Claude API, returns ai_level 1-5 + profile fields; JWT verify disabled via config.toml --no-verify-jwt)
 - transcribe-audio (Good Tape proxy - not currently used)
 
 ## Auth Sprint — COMPLETE (April 15 2026)
@@ -109,64 +118,57 @@ Edge function updated: supabase/functions/process-entry/index.ts
   — German language instruction in system prompt
 
 ## Current Sprint
-Sprint 2 - My Builds page with real projects
-- Projects table created in Supabase ✅
-- RLS policies set ✅
-- Building New Build creation flow in Lovable tonight
+Sprint 4 - Distribution + Collaboration
+- Gladia transcription integration (replace Web Speech API, fixes mobile Chrome)
+- Collaborate feed with email domain matching for org detection
+- Public profile URL for sharing (/p/:username or similar)
+- Shipped card (viral sharing moment)
+- Clickable project page with full build analysis
 
-## Sprint 2 - Project Experience
+## Sprint 2 - Project Experience — COMPLETE
 Goal: Entries land somewhere meaningful, not just a feed
 
-- Project creation flow: name, one liner, goal, intended outcome
-- Goal pinned to top of project
-- Entries assigned to projects
-- Session concept: group related entries together with session_id
-- Timeline view per project showing real entries not mock data
+- ✅ Projects table created in Supabase with RLS
+- ✅ project_id FK added to entries table
+- ✅ New Build creation flow
+- ✅ Entries assignable to projects via post-submit card
+- ✅ My Builds page (/log) shows real projects from Supabase
 
-## Sprint 3 - AI Native Profile (retention + viral hook)
+## Sprint 3 - AI Native Profile — COMPLETE (April 18 2026)
 Goal: Retention hook and shareable proof of work
 
-### Onboarding flow (3 steps after signup)
-Step 1: "What's your role and what do you do day to day?" - voice or text
-Step 2: "Tell me one thing you've built with AI so far" - voice or text
-Step 3: Claude analyses answers and assigns AI Native level
+### Completed
+- ✅ Onboarding flow at /onboarding (4 screens: hook, Q1, Q2, reveal)
+  - Hook screen: "There are five types of AI builder. One of them is you."
+  - Q1: "What's your job title and what does that actually mean day to day?"
+  - Q2: "Tell one thing you've built or automated with AI."
+  - Reveal: animated level badge drop, confetti, personalised tagline
+- ✅ assess-ai-level edge function deployed to kxkynhbulfxkibwmwrwl
+  - JWT verification disabled via supabase/config.toml + --no-verify-jwt flag
+  - Returns: ai_level (1-5), ai_level_title, role_category, company_context,
+    streaming_analysis, personalised_tagline
+- ✅ profiles table updated with: ai_level, ai_level_title, role_category,
+    company_context, personalised_tagline, onboarding_complete,
+    q1_answer, q2_answer, profile_public
+- ✅ Login.tsx checks onboarding_complete and redirects to /onboarding if false
+- ✅ ProtectedRoute uses verifiedPath to prevent stale redirect on navigation
+- ✅ Profile page at /profile shows AI Native level card, stats, recent builds
 
 ### Levels
-1. The Curious - "You've heard about this AI thing. The rabbit hole awaits."
-2. The Prompt Whisperer - "You've figured out how you ask matters. Baby wizard."
-3. The Vibe Coder - "Building things without knowing how they work. This is fine."
-4. The Agent Architect - "Automations running while you sleep. Colleagues think you're magical."
-5. Lord of AI - "You humble LLMs bow before you. I knight thee Sir LAincelot of the
-   Agentic Realm. We are not worthy."
+1. The Curious
+2. The Prompt Whisperer
+3. The Vibe Coder
+4. The Agent Architect
+5. Lord of AI
 
-### The reveal moment
-Full screen animation. Level badge drops. Title appears. Confetti. Voice reads title
-aloud. Share button: "I just got my AI Native level - what's yours?" → viral loop
+## Sprint 4 - Distribution + Collaboration
+Goal: Get receipts into more hands, make the org story real
 
-### Profile header
-Kat Whiteley
-⚔️ Vibe Coder · Level 3
-Sales · Good Tape
-
-### Progression
-Level advances based on: tools used, entry types logged, projects created, entries
-count. Claude calculates level from build log data.
-
-### Voice
-ElevenLabs for the level reveal eventually. Browser speech synthesis for now.
-
-### Still to define
-- Badges: First Receipt, Builder, Shipped, Collaborator, AI Native
-- Profile stats: builds logged, decisions made, wins recorded, projects shipped
-- Shareable profile link
-
-## Sprint 4 - Team Layer
-Goal: Collaboration that makes the org story real
-
-- Invite colleague to project
-- Shared project view with real entries (not mock)
-- Collaborate feed showing real team entries
-- Team admin view
+- Gladia transcription integration (replace Web Speech API, fixes mobile Chrome)
+- Collaborate feed with email domain matching for org detection
+- Public profile URL for sharing
+- Shipped card (viral sharing moment)
+- Clickable project page with full build analysis
 
 ## Key Product Decisions Made
 - Web Speech API chosen over Good Tape for demo (audio format issues
