@@ -102,12 +102,19 @@ Table: ideas
 
 Table: projects
 - id, owner_id, name, one_liner, goal, status, created_at
+- shipped_at (timestamptz) — set when generate-shipped-card runs
+- key_wins (text[]) — 3 punchy wins, Claude-generated
+- one_line_learning (text) — single learning sentence, Claude-generated
+- tools_used (text[]) — tools/APIs extracted from entries
+- RLS: owners can read/write their own; anon can SELECT where status = 'Shipped'
 
 Edge functions deployed:
 - process-entry (Claude Haiku, generates claim; --no-verify-jwt)
 - assess-ai-level (Claude Haiku, returns ai_level 1-5 + profile fields; --no-verify-jwt)
 - transcribe-audio (ElevenLabs scribe_v2 STT proxy; --no-verify-jwt)
 - text-to-speech (ElevenLabs eleven_multilingual_v2 TTS proxy; --no-verify-jwt)
+- generate-shipped-card (Claude Haiku; fetches project + entries, generates key_wins/
+  one_line_learning/tools_used, sets shipped_at + status='shipped'; --no-verify-jwt)
 
 All edge functions: JWT verification disabled via supabase/config.toml + --no-verify-jwt flag
 All edge functions: claude-haiku-4-5-20251001 (cost reduction from Sonnet)
@@ -178,11 +185,19 @@ Goal: Retention hook and shareable proof of work
 ## Current Sprint — Sprint 4: Distribution + Collaboration
 Goal: Get receipts into more hands, make the org story real
 
-- Shipped card: mark a build as shipped, generate a visual card with tools used,
-  wins, learnings, and AI Native level badge
-- Shipped card feeds into Collaborate feed (real entries, not mock)
-- Collaborate feed with email domain matching for org detection
-- Public profile URL for sharing (/p/:username or similar)
+- ✅ generate-shipped-card edge function (Claude Haiku, --no-verify-jwt)
+  - POST { project_id } → fetches project + all entries → Claude extracts
+    key_wins (3), one_line_learning, tools_used
+  - Updates project row: key_wins, one_line_learning, tools_used,
+    shipped_at = now(), status = 'shipped'
+  - Returns full updated project row
+- ✅ projects table: shipped_at, key_wins, one_line_learning, tools_used columns added
+- ✅ RLS: public anon SELECT policy on projects where status = 'Shipped'
+- ⬜ Shipped card UI: visual card component on My Builds page
+  (tools used, key wins, learning, AI Native level badge)
+- ⬜ Shipped card feeds into Collaborate feed (real entries, not mock)
+- ⬜ Collaborate feed with email domain matching for org detection
+- ⬜ Public profile URL for sharing (/p/:username or similar)
 
 ## Key Product Decisions Made
 - ElevenLabs chosen for both STT (scribe_v2) and TTS (eleven_multilingual_v2)
