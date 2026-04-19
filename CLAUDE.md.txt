@@ -38,10 +38,22 @@ Working features:
 - Ideas tab (/ideas) with post-it card grid, auto-tagging, voice capture,
   expand/collapse per card, promote-to-build flow
 - Record page inbox model (unassigned entries only, not project-specific)
-- "Add to a build?" project dropdown on Stage 1 and Stage 2 of recording card
-- Collaborate page at /collaborate with team feed (mock data)
-- Profile page at /profile with AI Native level card, stats, recent builds,
-  voice language selector (saved to profiles.preferred_language)
+- Project pill selector on Stage 1 and Stage 2 of recording card
+- Inbox badge on Record sidebar showing unassigned entry count
+- Collaborate page at /collaborate — real workspace feed with team shipped builds
+  - Create workspace or join with invite code
+  - Invite colleagues panel with copyable invite link
+  - Feed renders: builder name, project name, goal, tools used chips, "View card" link
+- Shipped card public page at /shipped/[project_id]
+  - Public for anon + authenticated users via RLS
+  - Shows key_wins, one_line_learning, tools_used, AI Native level badge
+  - Profile page shows shipped builds portfolio
+- Workspace system fully deployed:
+  - workspaces, workspace_members, workspace_invites, workspace_feed tables
+  - create-workspace and join-workspace edge functions (auth via Bearer token extraction)
+  - Shipped builds auto-post to workspace_feed via generate-shipped-card
+  - RLS fixed: workspace SELECT allows owner OR member; workspace_members RLS
+    uses flat user_id = auth.uid() (no recursive subquery)
 - Real auth via Supabase Auth (email/password) — LIVE as of April 15 2026
   - Signup and login pages at /signup and /login
   - Protected routes: /record, /log, /ideas, /collaborate, /profile, /onboarding
@@ -61,8 +73,10 @@ Working features:
 - ProtectedRoute uses verifiedPath pattern to prevent stale redirect on navigation
 
 Known issues:
-- Collaborate feed shows mock data only — real org matching not yet built
-- No public profile URL yet — Share Profile button needs a real public route
+- generate-shipped-card edge function not auto-inserting into workspace_feed
+  (manual SQL workaround in place for now — needs fixing next session)
+- Project pills not showing on post-submit receipt card (Lovable sync issue)
+- Orb on My Builds page doesn't have assign-to-project flow yet
 
 ## Supabase Schema
 Table: entries
@@ -96,6 +110,7 @@ Table: profiles
 - q2_answer (text)
 - profile_public (bool)
 - preferred_language (text, default 'en')
+- workspace_id (uuid, FK to workspaces)
 
 Table: ideas
 - id, owner_id, raw_text, tag, project_id, created_at
@@ -106,7 +121,27 @@ Table: projects
 - key_wins (text[]) — 3 punchy wins, Claude-generated
 - one_line_learning (text) — single learning sentence, Claude-generated
 - tools_used (text[]) — tools/APIs extracted from entries
-- RLS: owners can read/write their own; anon can SELECT where status = 'Shipped'
+- RLS: owners can read/write their own; anon + authenticated can SELECT
+  where status = 'Shipped'
+
+Table: workspaces
+- id, name, owner_id, created_at
+- RLS: SELECT allowed if owner OR workspace_member; INSERT/UPDATE for owner
+
+Table: workspace_members
+- id, workspace_id, user_id, role (owner/member), joined_at
+- UNIQUE(workspace_id, user_id)
+- RLS: SELECT where user_id = auth.uid() (flat, no recursive subquery)
+- INSERT where user_id = auth.uid()
+
+Table: workspace_invites
+- id, workspace_id, invite_code (unique, 8-char), created_by, created_at,
+  expires_at (7 days)
+- RLS: members can SELECT and INSERT
+
+Table: workspace_feed
+- id, workspace_id, user_id, project_id, event_type, created_at
+- RLS: members can SELECT and INSERT
 
 Edge functions deployed:
 - process-entry (Claude Haiku, generates claim; --no-verify-jwt)
@@ -114,10 +149,19 @@ Edge functions deployed:
 - transcribe-audio (ElevenLabs scribe_v2 STT proxy; --no-verify-jwt)
 - text-to-speech (ElevenLabs eleven_multilingual_v2 TTS proxy; --no-verify-jwt)
 - generate-shipped-card (Claude Haiku; fetches project + entries, generates key_wins/
-  one_line_learning/tools_used, sets shipped_at + status='shipped'; --no-verify-jwt)
+  one_line_learning/tools_used, sets shipped_at + status='Shipped'; posts to
+  workspace_feed if owner has workspace_id; --no-verify-jwt)
+- create-workspace (creates workspace + member + invite + updates profile; auth via
+  Bearer token → supabase.auth.getUser(token); --no-verify-jwt)
+- join-workspace (validates invite code, checks expiry, upserts member, updates
+  profile workspace_id; --no-verify-jwt)
 
 All edge functions: JWT verification disabled via supabase/config.toml + --no-verify-jwt flag
 All edge functions: claude-haiku-4-5-20251001 (cost reduction from Sonnet)
+
+Key technical note: edge functions use service role client +
+supabase.auth.getUser(token) to identify caller — NOT auth.uid() which
+only works in Postgres RLS context.
 
 ## Auth Sprint — COMPLETE (April 15 2026)
 Goal: Real user accounts so each person has their own data
@@ -182,22 +226,42 @@ Goal: Retention hook and shareable proof of work
 4. The Agent Architect
 5. Lord of AI
 
-## Current Sprint — Sprint 4: Distribution + Collaboration
+## Sprint 4 - Distribution + Collaboration — COMPLETE (April 19 2026)
 Goal: Get receipts into more hands, make the org story real
 
 - ✅ generate-shipped-card edge function (Claude Haiku, --no-verify-jwt)
   - POST { project_id } → fetches project + all entries → Claude extracts
     key_wins (3), one_line_learning, tools_used
-  - Updates project row: key_wins, one_line_learning, tools_used,
-    shipped_at = now(), status = 'shipped'
-  - Returns full updated project row
-- ✅ projects table: shipped_at, key_wins, one_line_learning, tools_used columns added
-- ✅ RLS: public anon SELECT policy on projects where status = 'Shipped'
-- ⬜ Shipped card UI: visual card component on My Builds page
-  (tools used, key wins, learning, AI Native level badge)
-- ⬜ Shipped card feeds into Collaborate feed (real entries, not mock)
-- ⬜ Collaborate feed with email domain matching for org detection
+  - Updates project: key_wins, one_line_learning, tools_used,
+    shipped_at = now(), status = 'Shipped'
+  - Posts 'shipped' event to workspace_feed if owner has workspace_id
+- ✅ projects table: shipped_at, key_wins, one_line_learning, tools_used added
+- ✅ Shipped card public page at /shipped/[project_id]
+  - RLS: anon + authenticated can SELECT where status = 'Shipped'
+- ✅ Workspace system: 4 new tables + RLS policies
+  - workspaces, workspace_members, workspace_invites, workspace_feed
+  - profiles.workspace_id FK added
+  - Recursive RLS bug fixed (workspace_members flat policy)
+- ✅ create-workspace edge function: creates workspace + member + invite,
+  updates profile.workspace_id; auth via Bearer token extraction
+- ✅ join-workspace edge function: validates invite code + expiry, upserts
+  member, updates profile.workspace_id
+- ✅ Collaborate page real feed: fetches workspace_feed rows, parallel
+  lookups for profiles + projects, renders name/project/goal/tools
+- ✅ Invite colleagues panel: copyable invite link + code display
+- ✅ Inbox badge on Record sidebar showing unassigned entry count
+- ✅ Project pill selector on entry assignment in All Entries feed
+- ✅ Profile page shows shipped builds portfolio
+
+## Current Sprint — Sprint 5
+Goal: Polish, public sharing, retention
+
+- ⬜ Fix generate-shipped-card workspace_feed auto-insert
+  (currently failing silently — manual SQL workaround in place)
 - ⬜ Public profile URL for sharing (/p/:username or similar)
+- ⬜ Mobile optimisation
+- ⬜ Streaks and daily prompts
+- ⬜ Clickable project page with full entry analysis
 
 ## Key Product Decisions Made
 - ElevenLabs chosen for both STT (scribe_v2) and TTS (eleven_multilingual_v2)
@@ -213,6 +277,9 @@ Goal: Get receipts into more hands, make the org story real
 - Renamed "My Projects" to "My Builds"
 - Entry types map to grouping tabs
 - Record page shows inbox model (unassigned only), not all entries
+- Workspace feed uses parallel Supabase lookups (not join) to avoid FK alias issues
+- Edge functions identify caller via supabase.auth.getUser(Bearer token) with
+  service role client — SUPABASE_ANON_KEY is NOT auto-injected into edge functions
 
 ## ICP and Positioning
 Primary user: Sales and marketing professionals at SaaS companies
