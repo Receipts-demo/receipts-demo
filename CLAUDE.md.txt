@@ -13,29 +13,35 @@ GitHub (React frontend): https://github.com/Receipts-demo/get-receipts
 Supabase project: kxkynhbulfxkibwmwrwl (Central EU)
 
 ## Current Tech Stack
-- Frontend: Lovable (React/TypeScript)
-- Backend: Supabase (Postgres)
-- Voice: Web Speech API (browser native) — Gladia replacing this in Sprint 4
-- AI claim generation: Claude Sonnet via Supabase edge function (process-entry)
-- AI level assessment: Claude Sonnet via Supabase edge function (assess-ai-level)
-- Transcription roadmap: Gladia (replacing Web Speech API for mobile support)
+- Frontend: React/TypeScript (Lovable + Claude Code)
+- Backend: Supabase (Postgres + Edge Functions)
+- Voice STT: ElevenLabs scribe_v2 via transcribe-audio edge function (multilingual, auto-detect)
+- Voice TTS: ElevenLabs eleven_multilingual_v2 via text-to-speech edge function
+- AI claim generation: Claude Haiku via process-entry edge function
+- AI level assessment: Claude Haiku via assess-ai-level edge function
 - Auth: Supabase Auth email/password — COMPLETE (April 15 2026)
 
-## Current State (April 18 2026)
+## Current State (April 19 2026)
 Working features:
 - Landing page with waitlist (emails saved to Supabase)
-- Voice recording via Web Speech API → two save options:
-  - Quick save: raw transcript saved instantly as claim, skips Claude
+- Voice recording via ElevenLabs STT → two save options:
+  - Quick save: raw transcript saved instantly, skips Claude
   - Generate claim ✨: calls process-entry edge function, Claude generates claim
+- Short entry guard: transcripts < 10 words trigger voice nudge via ElevenLabs TTS
+  ("Hmm, I need a little more to work with. Tell me what you actually did or decided today.")
+- Audio context unlock on first click (Dashboard + Onboarding) for autoplay
 - Five starter prompts: Today I built / Today I learnt / Today I solved /
   One problem was / Next I will
 - Sequential prompt pulsing after each entry save
-- GlassOrb as hero on all main pages with contextual prompts
+- GlassOrb / ScaledGlassOrb as hero on all main pages
 - My Builds page (/log) with real projects from Supabase
 - Ideas tab (/ideas) with post-it card grid, auto-tagging, voice capture,
-  expand/collapse per card
-- Collaborate page at /collaborate with team feed
-- Profile page at /profile with AI Native level card, stats, recent builds
+  expand/collapse per card, promote-to-build flow
+- Record page inbox model (unassigned entries only, not project-specific)
+- "Add to a build?" project dropdown on Stage 1 and Stage 2 of recording card
+- Collaborate page at /collaborate with team feed (mock data)
+- Profile page at /profile with AI Native level card, stats, recent builds,
+  voice language selector (saved to profiles.preferred_language)
 - Real auth via Supabase Auth (email/password) — LIVE as of April 15 2026
   - Signup and login pages at /signup and /login
   - Protected routes: /record, /log, /ideas, /collaborate, /profile, /onboarding
@@ -43,26 +49,20 @@ Working features:
   - Entries filtered by owner_id so each user sees only their own data
   - Heading shows display_name from user metadata (falls back to email prefix)
   - Sign out button in sidebar
-  - RLS policies enforced in Supabase (entries, profiles, waitlist)
-  - Confirmation email redirect fixed (lands back in app correctly)
+  - RLS policies enforced in Supabase (entries, profiles, ideas, waitlist)
 - Delete entries with inline confirmation toast (Confirm / Cancel)
-- German language support — language toggle (🇬🇧 / 🇩🇪) on recording card;
-  speech recognition lang switches; Claude claims returned in German if input
-  is German
-- Short entry guard — transcripts under 10 words return skip:true from
-  process-entry edge function; orb speaks back and does not save to Supabase
+- Language-agnostic: ElevenLabs auto-detects spoken language; Claude responds in same language
 - Collapsible entry feed — each entry expands to show entry_type badge and
   relative timestamp; collapses to single truncated line
-- Get in touch button linking to get.receipts.ai@gmail.com
 - Onboarding flow at /onboarding (4 screens: hook, Q1, Q2, reveal) with
-  confetti, animated level reveal, and profile save
+  confetti, animated level reveal, voice level reveal, profile save
 - Login.tsx checks onboarding_complete on profiles table and redirects to
   /onboarding if false
+- ProtectedRoute uses verifiedPath pattern to prevent stale redirect on navigation
 
 Known issues:
-- Web Speech API doesn't work on mobile Chrome — blocked until Gladia integration
+- Collaborate feed shows mock data only — real org matching not yet built
 - No public profile URL yet — Share Profile button needs a real public route
-- Collaborate feed shows mock data only
 
 ## Supabase Schema
 Table: entries
@@ -83,47 +83,45 @@ Table: entries
 Table: waitlist
 - id, email, created_at
 
+Table: profiles
+- id (uuid, FK to auth.users)
+- display_name (text)
+- ai_level (int)
+- ai_level_title (text)
+- role_category (text)
+- company_context (text)
+- personalised_tagline (text)
+- onboarding_complete (bool)
+- q1_answer (text)
+- q2_answer (text)
+- profile_public (bool)
+- preferred_language (text, default 'en')
+
+Table: ideas
+- id, owner_id, raw_text, tag, project_id, created_at
+
+Table: projects
+- id, owner_id, name, one_liner, goal, status, created_at
+
 Edge functions deployed:
-- process-entry (calls Claude API, generates claim)
-- assess-ai-level (calls Claude API, returns ai_level 1-5 + profile fields; JWT verify disabled via config.toml --no-verify-jwt)
-- transcribe-audio (Good Tape proxy - not currently used)
+- process-entry (Claude Haiku, generates claim; --no-verify-jwt)
+- assess-ai-level (Claude Haiku, returns ai_level 1-5 + profile fields; --no-verify-jwt)
+- transcribe-audio (ElevenLabs scribe_v2 STT proxy; --no-verify-jwt)
+- text-to-speech (ElevenLabs eleven_multilingual_v2 TTS proxy; --no-verify-jwt)
+
+All edge functions: JWT verification disabled via supabase/config.toml + --no-verify-jwt flag
+All edge functions: claude-haiku-4-5-20251001 (cost reduction from Sonnet)
 
 ## Auth Sprint — COMPLETE (April 15 2026)
 Goal: Real user accounts so each person has their own data
 
-Steps:
-1. ✅ Enable Supabase Auth (email/password)
-2. ✅ Add sign up / login pages (/signup, /login)
-3. ✅ Replace localStorage userName with auth user id
-4. ✅ Add owner_id to all entry inserts
-5. ✅ Filter entries by authenticated user (owner_id = auth.uid())
-6. ✅ RLS policies on entries, profiles, waitlist tables
-7. ✅ Confirmation email redirect lands back in app correctly
-8. ⬜ Update waitlist to capture auth signups (deferred to Sprint 2)
-
-Files changed (all in Receipts-demo/get-receipts):
-- src/contexts/AuthContext.tsx (new) — AuthProvider + useAuth hook
-- src/pages/Login.tsx (new)
-- src/pages/SignUp.tsx (new)
-- src/App.tsx — AuthProvider, ProtectedRoute, /login + /signup routes
-- src/pages/Dashboard.tsx — owner_id insert, filtered query, auth display name,
-  delete with confirmation toast, German language toggle, skip guard,
-  collapsible ExpandableEntry feed
-- src/pages/BuildLog.tsx — owner_id filtered query, auth display name
-- src/pages/Landing.tsx — removed name modal, Sign in → /login
-- src/components/AppSidebar.tsx — sign out button + display name
-SQL run in Supabase: supabase/migrations/20260415_auth.sql
-Edge function updated: supabase/functions/process-entry/index.ts
-  — skip:true for transcripts < 10 words
-  — German language instruction in system prompt
-
-## Current Sprint
-Sprint 4 - Distribution + Collaboration
-- Gladia transcription integration (replace Web Speech API, fixes mobile Chrome)
-- Collaborate feed with email domain matching for org detection
-- Public profile URL for sharing (/p/:username or similar)
-- Shipped card (viral sharing moment)
-- Clickable project page with full build analysis
+- ✅ Enable Supabase Auth (email/password)
+- ✅ Add sign up / login pages (/signup, /login)
+- ✅ Replace localStorage userName with auth user id
+- ✅ Add owner_id to all entry inserts
+- ✅ Filter entries by authenticated user (owner_id = auth.uid())
+- ✅ RLS policies on entries, profiles, waitlist tables
+- ✅ Confirmation email redirect lands back in app correctly
 
 ## Sprint 2 - Project Experience — COMPLETE
 Goal: Entries land somewhere meaningful, not just a feed
@@ -133,26 +131,42 @@ Goal: Entries land somewhere meaningful, not just a feed
 - ✅ New Build creation flow
 - ✅ Entries assignable to projects via post-submit card
 - ✅ My Builds page (/log) shows real projects from Supabase
+- ✅ Ideas tab with post-it card grid, auto-tagging, voice capture
+- ✅ Promote idea to build flow
+- ✅ Record page inbox model (unassigned entries only)
 
-## Sprint 3 - AI Native Profile — COMPLETE (April 18 2026)
+## Sprint 3 - AI Native Profile — COMPLETE (April 19 2026)
 Goal: Retention hook and shareable proof of work
 
-### Completed
 - ✅ Onboarding flow at /onboarding (4 screens: hook, Q1, Q2, reveal)
   - Hook screen: "There are five types of AI builder. One of them is you."
   - Q1: "What's your job title and what does that actually mean day to day?"
   - Q2: "Tell one thing you've built or automated with AI."
-  - Reveal: animated level badge drop, confetti, personalised tagline
-- ✅ assess-ai-level edge function deployed to kxkynhbulfxkibwmwrwl
-  - JWT verification disabled via supabase/config.toml + --no-verify-jwt flag
+  - Reveal: animated level badge drop, confetti, personalised tagline, voice level reveal
+- ✅ assess-ai-level edge function (Claude Haiku, --no-verify-jwt)
   - Returns: ai_level (1-5), ai_level_title, role_category, company_context,
     streaming_analysis, personalised_tagline
-- ✅ profiles table updated with: ai_level, ai_level_title, role_category,
-    company_context, personalised_tagline, onboarding_complete,
-    q1_answer, q2_answer, profile_public
+  - Level 3 minimum for anyone who built a working tool (strengthened prompt)
+- ✅ profiles table updated with all AI Native fields + preferred_language
 - ✅ Login.tsx checks onboarding_complete and redirects to /onboarding if false
 - ✅ ProtectedRoute uses verifiedPath to prevent stale redirect on navigation
 - ✅ Profile page at /profile shows AI Native level card, stats, recent builds
+- ✅ ElevenLabs STT via transcribe-audio edge function (scribe_v2, multilingual)
+  - Audio sent as base64 JSON to avoid Deno FormData parsing issues
+  - Language auto-detected; language_code only sent if explicit ISO code
+- ✅ ElevenLabs TTS via text-to-speech edge function (Mariana voice, eleven_multilingual_v2)
+- ✅ speak() utility at src/utils/speak.ts
+  - Uses raw fetch to Supabase function URL (not supabase.functions.invoke) for binary audio
+  - Handles NotAllowedError gracefully (logs warning, resolves without throwing)
+- ✅ Voice nudge on short entries (< 10 words): ElevenLabs speaks the prompt back
+- ✅ Voice level reveal on onboarding Screen 4
+- ✅ Audio unlock useEffect on Dashboard and Onboarding (first click primes audio context)
+- ✅ Quick save option (skips Claude, saves raw transcript with project_id)
+- ✅ Language-agnostic: removed German toggle, ElevenLabs auto-detects all languages
+- ✅ preferred_language field on profiles table (migration applied)
+- ✅ Language selector on Profile page (saves to profiles.preferred_language)
+- ✅ All edge functions migrated to Claude Haiku (claude-haiku-4-5-20251001)
+- ✅ ELEVENLABS_API_KEY moved from frontend env to Supabase secret
 
 ### Levels
 1. The Curious
@@ -161,28 +175,29 @@ Goal: Retention hook and shareable proof of work
 4. The Agent Architect
 5. Lord of AI
 
-## Sprint 4 - Distribution + Collaboration
+## Current Sprint — Sprint 4: Distribution + Collaboration
 Goal: Get receipts into more hands, make the org story real
 
-- Gladia transcription integration (replace Web Speech API, fixes mobile Chrome)
+- Shipped card: mark a build as shipped, generate a visual card with tools used,
+  wins, learnings, and AI Native level badge
+- Shipped card feeds into Collaborate feed (real entries, not mock)
 - Collaborate feed with email domain matching for org detection
-- Public profile URL for sharing
-- Shipped card (viral sharing moment)
-- Clickable project page with full build analysis
+- Public profile URL for sharing (/p/:username or similar)
 
 ## Key Product Decisions Made
-- Web Speech API chosen over Good Tape for demo (audio format issues
-  with webm) - Good Tape is the production plan
-- localStorage for multi-user without auth - replaced by Supabase Auth (April 15 2026)
+- ElevenLabs chosen for both STT (scribe_v2) and TTS (eleven_multilingual_v2)
+  — multilingual, auto-detect, better than Web Speech API on mobile
+- Audio sent as base64 JSON to edge functions to avoid Deno FormData parsing issues
+- speak() uses raw fetch (not supabase.functions.invoke) to get binary audio
+- Haiku model on all edge functions — sufficient quality, lower cost/latency
+- Language-agnostic: removed German toggle, ElevenLabs + Claude auto-handle all languages
+- localhost for multi-user without auth — replaced by Supabase Auth (April 15 2026)
 - Lovable for UI, Claude Code for backend logic
-- Five prompt types chosen based on real user need:
-  built/learnt/solved/problem/next
-- Session grouping of entries deferred to auth sprint
+- Five prompt types chosen based on real user need: built/learnt/solved/problem/next
 - Tool auto-detection by Claude preferred over manual tagging
 - Renamed "My Projects" to "My Builds"
 - Entry types map to grouping tabs
-- Orb speaks back on short entries (browser speech synthesis now, ElevenLabs planned Sprint 3)
-- ElevenLabs planned for Sprint 3 voice personality
+- Record page shows inbox model (unassigned only), not all entries
 
 ## ICP and Positioning
 Primary user: Sales and marketing professionals at SaaS companies
