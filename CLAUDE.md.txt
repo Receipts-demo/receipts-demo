@@ -253,14 +253,50 @@ Goal: Get receipts into more hands, make the org story real
 - ✅ Project pill selector on entry assignment in All Entries feed
 - ✅ Profile page shows shipped builds portfolio
 
-## Current Sprint — Sprint 5
-Goal: Polish, public sharing, retention
+## Current Sprint — Sprint 5 - Gamification + Profile Depth
+Goal: Points, badges, leaderboard, profile depth, viral sharing mechanics
 
+### Points System
+- Quick save = 1 point
+- Generate claim = 2 points
+- Assign to a build = +1 bonus
+- Ship a build = 5 points
+- Capture an idea = 1 point
+- Streak day = +1 bonus per consecutive day
+
+### Badges (first set - more to be added)
+- 🍒 Cherry Picked - first entry logged
+- ⚡ Sparked - 3 day streak
+- 🥋 Claude Ninja - 10 builds shipped
+- 🔥 On Fire - 7 day streak
+- 🏗️ Architect - 5 active builds
+- 👻 Ghost Mode - logged at midnight
+- 🌍 Polyglot - logged in 3 languages
+- 🎯 Sniper - 30 day streak
+- 👑 Lord of Receipts - Level 5 + 50 entries
+- More badge names and surprises to be added - keep refreshing and surprising
+
+### Leaderboard
+- Team leaderboard on Collaborate page
+- Opt-in only, default private
+- Shows points this week, streak, builds shipped
+
+### Profile Depth
+- Contribution graph (GitHub style) - green squares for every day logged
+- Streak counter visible on profile
+- Badge collection displayed on profile
+- Tools I work with - auto-populated from tool_tags across all entries and shipped cards, shown as chips on profile
+- Total points displayed
+
+### Viral Mechanic
+- Shareable badge moments - "I just hit Claude Ninja on Receipts 🥋"
+- Badge reveals feel like level reveals - small animation, Mariana reads the badge name
+
+Existing backlog carried into Sprint 5:
 - ⬜ Fix generate-shipped-card workspace_feed auto-insert
   (currently failing silently — manual SQL workaround in place)
 - ⬜ Public profile URL for sharing (/p/:username or similar)
-- ⬜ Mobile optimisation
-- ⬜ Streaks and daily prompts
+- ⬜ Mobile optimisation (BuildLog card layout fixed April 22 2026)
 - ⬜ Clickable project page with full entry analysis
 
 ## Key Product Decisions Made
