@@ -1,6 +1,6 @@
 [auth.oauth_server]
 enabled = true
-authorization_url_path = "/oauth/consent"
+authorization_url_path = "https://receipts.tools/oauth/consent"
 allow_dynamic_registration = true
 
 [functions.assess-ai-level]
