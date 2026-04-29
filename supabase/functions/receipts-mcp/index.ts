@@ -181,8 +181,9 @@ Deno.serve(async (req: Request) => {
 
   // initialize and its ack notification don't require auth — client hasn't sent token yet
   if (method === "initialize") {
+    const clientVersion = (params as { protocolVersion?: string })?.protocolVersion ?? "2024-11-05";
     return ok(id, {
-      protocolVersion: "2024-11-05",
+      protocolVersion: clientVersion,
       capabilities: { tools: {} },
       serverInfo: { name: "receipts", version: "1.0.0" },
     });
