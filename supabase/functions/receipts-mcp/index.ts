@@ -1,10 +1,14 @@
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+const MCP_URL = "https://kxkynhbulfxkibwmwrwl.supabase.co/functions/v1/receipts-mcp";
+const AUTH_SERVER = "https://kxkynhbulfxkibwmwrwl.supabase.co/auth/v1";
+const WWW_AUTH = `Bearer resource_metadata="${MCP_URL}"`;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, mcp-session-id",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 async function resolveUser(token: string): Promise<string | null> {
@@ -149,6 +153,16 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  // Protected Resource Metadata — claude.ai fetches this to discover the auth server
+  if (req.method === "GET") {
+    return Response.json({
+      resource: MCP_URL,
+      authorization_servers: [AUTH_SERVER],
+      bearer_methods_supported: ["header"],
+      scopes_supported: ["openid", "email"],
+    }, { headers: corsHeaders });
+  }
+
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
@@ -185,7 +199,7 @@ Deno.serve(async (req: Request) => {
   if (!token) {
     return new Response(
       JSON.stringify({ error: "Missing Authorization header" }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json", "WWW-Authenticate": WWW_AUTH } }
     );
   }
 
@@ -193,7 +207,7 @@ Deno.serve(async (req: Request) => {
   if (!userId) {
     return new Response(
       JSON.stringify({ error: "Invalid or expired token" }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json", "WWW-Authenticate": WWW_AUTH } }
     );
   }
 
