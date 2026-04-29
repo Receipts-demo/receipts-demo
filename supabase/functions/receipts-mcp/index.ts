@@ -101,6 +101,7 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
         owner_id: userId,
         recorded_at: new Date().toISOString(),
         entry_type: "build",
+        source: "mcp",
       };
       if (args.project_id) row.project_id = args.project_id;
       const result = await db("entries", "POST", row) as Array<{ id: string }>;
