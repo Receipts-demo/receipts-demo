@@ -253,19 +253,73 @@ Goal: Get receipts into more hands, make the org story real
 - ✅ Project pill selector on entry assignment in All Entries feed
 - ✅ Profile page shows shipped builds portfolio
 
-## MCP Integration — COMPLETE (April 29 2026)
+## MCP Integration — IN PROGRESS (April 29 2026)
 Goal: Log entries directly from Claude conversations without opening the app
 
-- ✅ Receipts MCP server built at /mcp/src/index.ts
-- ✅ 4 tools exposed:
-  - log_entry — logs a new entry to Supabase entries table
-  - get_my_builds — fetches the user's active projects
-  - update_build_status — updates a project's status field
-  - add_idea — creates a new idea record
-- ✅ Uses Supabase service role key to bypass RLS (server-side writes)
-- ✅ Registered globally in ~/.claude.json (available in all Claude Code sessions)
-- ✅ Successfully tested — entries log directly from Claude conversations to Supabase
-- ⬜ Currently local only (stdio transport) — needs conversion to hosted HTTP transport
+### What is built and working
+- ✅ Local stdio MCP server at /mcp/src/index.ts — tested, entries log to Supabase
+- ✅ Hosted edge function at supabase/functions/receipts-mcp/index.ts
+  - MCP Streamable HTTP transport (JSON-RPC 2.0 over POST)
+  - GET handler returns Protected Resource Metadata
+  - 401 responses include WWW-Authenticate header
+  - Mirrors client protocol version in initialize response
+  - source: 'mcp' tag on all log_entry inserts
+- ✅ Deno Deploy proxy at mcp-proxy/main.ts — deployed at mcp.receipts.tools
+  - Serves /.well-known/oauth-protected-resource at domain root (required by claude.ai)
+  - Forwards /.well-known/oauth-authorization-server from Supabase
+  - Proxies all MCP traffic to the Supabase edge function
+  - Rewrites WWW-Authenticate header to point to mcp.receipts.tools
+- ✅ DNS: mcp.receipts.tools live with SSL cert via Deno Deploy + Lovable DNS
+- ✅ Supabase OAuth server enabled (beta) — all 4 endpoints live
+- ✅ Dynamic client registration working (claude.ai can auto-register)
+- ✅ OAuth consent page built in Lovable at /oauth/consent
+  - Shows "Claude wants to connect" UI with bullet list and Allow/Deny
+  - Auth guard redirects to login if no session
+- ✅ OAuth redirect flow reaches consent page successfully
+
+### What is NOT working yet — blocked on consent approval
+The Supabase OAuth server beta does not send all original OAuth params
+(client_id, redirect_uri, state, etc.) to the consent page — it only sends
+authorization_id. When the consent page redirects back to GoTrue's authorize
+endpoint with just authorization_id, GoTrue returns 400 "client_id is required"
+because it validates all params before looking up stored state.
+
+Attempts made:
+- POST to /auth/v1/oauth/authorize → 405 (GET only)
+- GET redirect with authorization_id only → 400 client_id required
+- GET redirect with authorization_id + access_token → 400 same error
+- Supabase OAuth server beta is not designed for SPA consent pages
+
+### Plan for next session — build minimal OAuth server in Deno proxy
+Replace Supabase as the OAuth server. The Deno proxy at mcp.receipts.tools
+becomes the OAuth 2.1 server. Supabase is used only for user auth (JWT validation).
+
+Files to change:
+- mcp-proxy/main.ts — add OAuth endpoints (authorize, token, discovery, JWKS)
+- mcp-proxy/main.ts — use Deno KV (free, built-in) for state storage between steps
+
+Flow the new OAuth server handles:
+1. GET /oauth/authorize — receives claude.ai's request with client_id + PKCE params,
+   stores all params in Deno KV keyed by state, redirects user to Supabase login
+2. Supabase login completes → redirects user to /oauth/callback on the proxy
+3. Proxy /oauth/callback reads Deno KV to get original params, shows consent OR
+   auto-approves, generates auth code (random string), stores code→user mapping in KV,
+   redirects to claude.ai with code
+4. POST /oauth/token — claude.ai exchanges code for token, proxy looks up user from KV,
+   calls Supabase to get/validate user's JWT, returns it as the access token
+5. claude.ai uses Supabase JWT as Bearer token on MCP calls — resolveUser() already
+   handles this correctly, no changes needed to receipts-mcp edge function
+
+Protected Resource Metadata (/.well-known/oauth-protected-resource) needs to point
+authorization_servers to mcp.receipts.tools/oauth instead of Supabase auth server.
+
+Key technical notes:
+- Deno KV is available free on Deno Deploy — use for state storage (TTL 10 mins)
+- PKCE validation must be implemented (S256: SHA-256 of code_verifier = code_challenge)
+- Supabase edge function (receipts-mcp) is unchanged — resolveUser() already works
+- The consent page in Lovable may be simplified or removed (proxy handles consent)
+- Client registration: accept any client_id from Dynamic Client Registration,
+  store in Deno KV, no pre-registration needed
 
 ## Current Sprint — Sprint 5 - Gamification + Profile Depth
 Goal: Points, badges, leaderboard, profile depth, viral sharing mechanics
@@ -306,10 +360,10 @@ Goal: Points, badges, leaderboard, profile depth, viral sharing mechanics
 - Shareable badge moments - "I just hit Claude Ninja on Receipts 🥋"
 - Badge reveals feel like level reveals - small animation, Mariana reads the badge name
 
-### Next Build — MCP Hosted Conversion
-- ⬜ Convert MCP server to hosted Supabase edge function (HTTP transport)
-- ⬜ Add personal API token generation to Profile page in the app
-- ⬜ Publish to MCP registry once hosted
+### Next Build — MCP OAuth Server (paused April 29, resume tomorrow)
+- ⬜ Build minimal OAuth 2.1 server in mcp-proxy/main.ts (see MCP Integration section)
+- ⬜ Add personal API token display to Profile page (user copies JWT to connect)
+- ⬜ Publish to MCP registry once OAuth flow is end-to-end working
 - ⬜ Update demo video to show MCP connection flow
 
 Existing backlog carried into Sprint 5:
