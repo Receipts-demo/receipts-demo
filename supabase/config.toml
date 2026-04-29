@@ -1,2 +1,5 @@
 [functions.assess-ai-level]
 verify_jwt = false
+
+[functions.receipts-mcp]
+verify_jwt = false
