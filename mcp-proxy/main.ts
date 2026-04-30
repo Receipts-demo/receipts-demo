@@ -12,6 +12,10 @@ const CONSENT_URL = "https://receipts.tools/oauth/consent";
 // The anon key is safe to expose — it's already in the frontend JS bundle.
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
+// Set CODE_SECRET in Deno Deploy env vars — used to AES-GCM encrypt auth codes.
+// The code IS the encrypted token payload, so no KV lookup is needed at token exchange.
+const CODE_SECRET = Deno.env.get("CODE_SECRET") ?? "receipts-mcp-default-secret-32ch";
+
 const KV_TTL = 10 * 60 * 1000; // 10 minutes in milliseconds
 
 const corsHeaders: Record<string, string> = {
@@ -60,6 +64,48 @@ function randomHex(bytes = 32): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(bytes)))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+// ─── Encrypted Auth Code ─────────────────────────────────────────────────────
+// The auth code is AES-GCM encrypted JSON. No KV lookup needed at token exchange —
+// the code carries the payload across Deno Deploy instances.
+
+async function getCodeKey(): Promise<CryptoKey> {
+  const raw = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(CODE_SECRET),
+  );
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function encryptCode(payload: AuthCode): Promise<string> {
+  const key = await getCodeKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext));
+  const combined = new Uint8Array(12 + ciphertext.byteLength);
+  combined.set(iv, 0);
+  combined.set(ciphertext, 12);
+  let str = "";
+  for (const b of combined) str += String.fromCharCode(b);
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+async function decryptCode(code: string): Promise<AuthCode | null> {
+  try {
+    const key = await getCodeKey();
+    const b64 = code.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - b64.length % 4) % 4);
+    const combined = Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: combined.slice(0, 12) },
+      key,
+      combined.slice(12),
+    );
+    return JSON.parse(new TextDecoder().decode(plaintext)) as AuthCode;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Supabase Token Validation ────────────────────────────────────────────────
@@ -274,22 +320,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { client_id, redirect_uri, code_challenge, code_challenge_method, access_token } =
       entry.value;
 
-    const codeBytes = crypto.getRandomValues(new Uint8Array(16));
-    const code = btoa(String.fromCharCode(...codeBytes))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=/g, "");
-
-    await kv.set(["code", code], {
+    const code = await encryptCode({
       access_token,
       code_challenge,
       code_challenge_method,
       client_id,
       redirect_uri,
       state,
-    } as AuthCode, { expireIn: KV_TTL });
+    });
 
-    console.log("[approve] stored code in KV:", code, "key: [code,", code, "]");
+    console.log("[approve] encrypted code length:", code.length);
 
     // One-time use — delete the auth request
     await kv.delete(["auth", state]);
@@ -343,17 +383,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonError(400, "invalid_request", "missing code or code_verifier");
     }
 
-    console.log("[token] looking up KV key: [code,", code, "]");
-    const codeEntry = await kv.get<AuthCode>(["code", code]);
-    if (!codeEntry.value) {
-      console.log("[token] error: code not found in KV for key: [code,", code, "]");
-      return jsonError(400, "invalid_grant", "unknown or expired code");
+    console.log("[token] decrypting code, length:", code.length);
+    const payload = await decryptCode(code);
+    if (!payload) {
+      console.log("[token] error: code decryption failed");
+      return jsonError(400, "invalid_grant", "invalid or expired code");
     }
 
-    const { access_token, code_challenge, code_challenge_method } = codeEntry.value;
+    const { access_token, code_challenge, code_challenge_method } = payload;
 
-    if (client_id && codeEntry.value.client_id !== client_id) {
-      console.log("[token] error: client_id mismatch", client_id, "vs", codeEntry.value.client_id);
+    if (client_id && payload.client_id !== client_id) {
+      console.log("[token] error: client_id mismatch", client_id, "vs", payload.client_id);
       return jsonError(400, "invalid_client", "client_id mismatch");
     }
 
@@ -365,9 +405,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return jsonError(400, "invalid_grant", "PKCE verification failed");
       }
     }
-
-    // One-time use — delete the code
-    await kv.delete(["code", code]);
 
     const tokenResponse = {
       access_token,
