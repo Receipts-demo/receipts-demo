@@ -5,7 +5,7 @@
 const SUPABASE_URL = "https://kxkynhbulfxkibwmwrwl.supabase.co";
 const SUPABASE_MCP = `${SUPABASE_URL}/functions/v1/receipts-mcp`;
 const MCP_URL = "https://mcp.receipts.tools";
-const APP_LOGIN_URL = "https://get-receipts.lovable.app/login";
+const APP_LOGIN_URL = "https://receipts.tools/login";
 const CONSENT_URL = "https://receipts.tools/oauth/consent";
 
 // Set SUPABASE_ANON_KEY in Deno Deploy env vars to enable token validation at callback.
