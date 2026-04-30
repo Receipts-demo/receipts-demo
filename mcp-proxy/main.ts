@@ -274,7 +274,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { client_id, redirect_uri, code_challenge, code_challenge_method, access_token } =
       entry.value;
 
-    const code = randomHex(32);
+    const code = crypto.getRandomValues(new Uint8Array(8))
+      .reduce((hex, b) => hex + b.toString(16).padStart(2, "0"), "");
 
     await kv.set(["code", code], {
       access_token,
