@@ -280,7 +280,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .replace(/\//g, "_")
       .replace(/=/g, "");
 
-    await kv.set(`code:${code}`, {
+    await kv.set(["code", code], {
       access_token,
       code_challenge,
       code_challenge_method,
@@ -289,7 +289,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       state,
     } as AuthCode, { expireIn: KV_TTL });
 
-    console.log("[approve] stored code in KV:", code, "key:", `code:${code}`);
+    console.log("[approve] stored code in KV:", code, "key: [code,", code, "]");
 
     // One-time use — delete the auth request
     await kv.delete(["auth", state]);
@@ -343,10 +343,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonError(400, "invalid_request", "missing code or code_verifier");
     }
 
-    console.log("[token] looking up KV key:", `code:${code}`);
-    const codeEntry = await kv.get<AuthCode>(`code:${code}`);
+    console.log("[token] looking up KV key: [code,", code, "]");
+    const codeEntry = await kv.get<AuthCode>(["code", code]);
     if (!codeEntry.value) {
-      console.log("[token] error: code not found in KV for key:", `code:${code}`);
+      console.log("[token] error: code not found in KV for key: [code,", code, "]");
       return jsonError(400, "invalid_grant", "unknown or expired code");
     }
 
@@ -367,7 +367,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // One-time use — delete the code
-    await kv.delete(`code:${code}`);
+    await kv.delete(["code", code]);
 
     const tokenResponse = {
       access_token,
