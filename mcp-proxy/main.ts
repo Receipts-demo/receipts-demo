@@ -285,6 +285,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       state,
     } as AuthCode, { expireIn: KV_TTL });
 
+    console.log("[approve] stored code in KV:", code, "key: code:", code);
+
     // One-time use — delete the auth request
     await kv.delete(["auth", state]);
 
@@ -316,7 +318,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const { code, code_verifier, grant_type, client_id } = params;
-    console.log("[token] grant_type:", grant_type, "code:", code?.slice(0, 8), "has_verifier:", !!code_verifier);
+    console.log("[token] grant_type:", grant_type, "code:", code?.slice(0, 16), "has_verifier:", !!code_verifier);
 
     if (grant_type !== "authorization_code") {
       console.log("[token] error: unsupported_grant_type", grant_type);
