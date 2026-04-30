@@ -168,6 +168,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       code_challenge_methods_supported: ["S256"],
       scopes_supported: ["openid", "email"],
       token_endpoint_auth_methods_supported: ["none"],
+      service_documentation: "https://receipts.tools",
+      op_policy_uri: "https://receipts.tools",
+      logo_uri: "https://kxkynhbulfxkibwmwrwl.supabase.co/storage/v1/object/public/public-assets/receipts-logo-mcp.png",
     }, { headers: corsHeaders });
   }
 
