@@ -130,12 +130,12 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
             project_tag?: string;
             skip?: boolean;
           };
-          if (!processed.skip && processed.claim) {
+          if (processed.claim) {
             const patch: Record<string, unknown> = { claim: processed.claim };
             if (processed.entry_type) patch.entry_type = processed.entry_type;
             if (processed.project_tag) patch.project_tag = processed.project_tag;
             await db(`entries?id=eq.${entryId}`, "PATCH", patch);
-            return `Entry logged.\n\nClaim: ${processed.claim}`;
+            return `Entry logged. Claim: ${processed.claim}`;
           }
         }
       } catch { /* claim generation failed — raw entry is saved */ }
