@@ -274,8 +274,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { client_id, redirect_uri, code_challenge, code_challenge_method, access_token } =
       entry.value;
 
-    const code = crypto.getRandomValues(new Uint8Array(8))
-      .reduce((hex, b) => hex + b.toString(16).padStart(2, "0"), "");
+    const codeBytes = crypto.getRandomValues(new Uint8Array(16));
+    const code = btoa(String.fromCharCode(...codeBytes))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "");
 
     await kv.set(["code", code], {
       access_token,
@@ -307,14 +310,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     let params: Record<string, string> = {};
     const contentType = req.headers.get("content-type") ?? "";
+    const rawBody = await req.text();
+    console.log("[token] raw body:", rawBody);
 
     if (contentType.includes("application/json")) {
       try {
-        params = await req.json();
+        params = JSON.parse(rawBody);
       } catch { /* ignore */ }
     } else {
-      const text = await req.text();
-      const form = new URLSearchParams(text);
+      const form = new URLSearchParams(rawBody);
       for (const [k, v] of form.entries()) params[k] = v;
     }
 
