@@ -191,11 +191,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       code_challenge_method,
     } as AuthRequest, { expireIn: KV_TTL });
 
+    console.log("[authorize] stored state in KV:", state.slice(0, 12), "client_id:", client_id);
+
     // Pass the callback URL so the login page knows exactly where to send the token
     const callbackUrl = `${MCP_URL}/oauth/callback?state=${encodeURIComponent(state)}`;
     const loginUrl = new URL(APP_LOGIN_URL);
     loginUrl.searchParams.set("oauth_redirect", callbackUrl);
 
+    console.log("[authorize] redirecting to login:", loginUrl.toString());
     return Response.redirect(loginUrl.toString(), 302);
   }
 
@@ -211,8 +214,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return new Response("Bad Request: missing state or access_token", { status: 400 });
     }
 
+    console.log("[callback] received state:", state.slice(0, 12), "has_token:", !!access_token);
+
     const entry = await kv.get<AuthRequest>(["auth", state]);
     if (!entry.value) {
+      console.log("[callback] error: state not found in KV:", state.slice(0, 12));
       return new Response("Bad Request: unknown or expired state — start the auth flow again", {
         status: 400,
       });
@@ -220,6 +226,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const valid = await validateSupabaseToken(access_token);
     if (!valid) {
+      console.log("[callback] error: invalid Supabase token");
       return new Response("Unauthorized: invalid Supabase token", { status: 401 });
     }
 
@@ -229,6 +236,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       access_token,
     } as AuthRequest, { expireIn: KV_TTL });
 
+    console.log("[callback] token stored, redirecting to consent");
     const consentUrl = new URL(CONSENT_URL);
     consentUrl.searchParams.set("state", state);
 
@@ -251,11 +259,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonError(400, "invalid_request", "missing state");
     }
 
+    console.log("[approve] received state:", state.slice(0, 12));
+
     const entry = await kv.get<AuthRequest>(["auth", state]);
     if (!entry.value) {
+      console.log("[approve] error: state not found in KV");
       return jsonError(400, "invalid_request", "unknown or expired state");
     }
     if (!entry.value.access_token) {
+      console.log("[approve] error: no access_token in KV entry — callback may not have run");
       return jsonError(400, "invalid_request", "no token on record — callback step may not have completed");
     }
 
@@ -288,6 +300,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Validates PKCE (S256) before returning the stored Supabase JWT.
   // Accepts both application/json and application/x-www-form-urlencoded bodies.
   if (path === "/oauth/token" && req.method === "POST") {
+    console.log("[token] POST /oauth/token", req.headers.get("content-type"));
+
     let params: Record<string, string> = {};
     const contentType = req.headers.get("content-type") ?? "";
 
@@ -302,22 +316,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const { code, code_verifier, grant_type, client_id } = params;
+    console.log("[token] grant_type:", grant_type, "code:", code?.slice(0, 8), "has_verifier:", !!code_verifier);
 
     if (grant_type !== "authorization_code") {
+      console.log("[token] error: unsupported_grant_type", grant_type);
       return jsonError(400, "unsupported_grant_type");
     }
     if (!code || !code_verifier) {
+      console.log("[token] error: missing code or code_verifier");
       return jsonError(400, "invalid_request", "missing code or code_verifier");
     }
 
     const codeEntry = await kv.get<AuthCode>(["code", code]);
     if (!codeEntry.value) {
+      console.log("[token] error: code not found in KV:", code?.slice(0, 8));
       return jsonError(400, "invalid_grant", "unknown or expired code");
     }
 
     const { access_token, code_challenge, code_challenge_method } = codeEntry.value;
 
     if (client_id && codeEntry.value.client_id !== client_id) {
+      console.log("[token] error: client_id mismatch", client_id, "vs", codeEntry.value.client_id);
       return jsonError(400, "invalid_client", "client_id mismatch");
     }
 
@@ -325,6 +344,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (code_challenge_method === "S256") {
       const computed = await sha256Base64Url(code_verifier);
       if (computed !== code_challenge) {
+        console.log("[token] error: PKCE mismatch — computed:", computed, "expected:", code_challenge);
         return jsonError(400, "invalid_grant", "PKCE verification failed");
       }
     }
@@ -332,11 +352,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // One-time use — delete the code
     await kv.delete(["code", code]);
 
-    return Response.json({
+    const tokenResponse = {
       access_token,
       token_type: "bearer",
+      expires_in: 3600,
       scope: "openid email",
-    }, { headers: corsHeaders });
+    };
+    console.log("[token] success — returning token, expires_in: 3600, token_prefix:", access_token?.slice(0, 20));
+
+    return Response.json(tokenResponse, { headers: corsHeaders });
   }
 
   // ── MCP Proxy ──────────────────────────────────────────────────────────────
