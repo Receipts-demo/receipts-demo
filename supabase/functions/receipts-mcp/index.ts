@@ -110,7 +110,37 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
       if (args.project_id) row.project_id = args.project_id;
       const result = await db("entries", "POST", row) as Array<{ id: string }>;
       const entry = Array.isArray(result) ? result[0] : result as { id?: string };
-      return `Entry logged. ID: ${entry?.id ?? "unknown"}`;
+      const entryId = entry?.id ?? "unknown";
+
+      // Call process-entry to generate a claim via Claude — best-effort, raw entry is already saved
+      try {
+        const processRes = await fetch(`${SUPABASE_URL}/functions/v1/process-entry`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+            apikey: SERVICE_ROLE_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ transcript: args.text as string }),
+        });
+        if (processRes.ok) {
+          const processed = await processRes.json() as {
+            claim?: string;
+            entry_type?: string;
+            project_tag?: string;
+            skip?: boolean;
+          };
+          if (!processed.skip && processed.claim) {
+            const patch: Record<string, unknown> = { claim: processed.claim };
+            if (processed.entry_type) patch.entry_type = processed.entry_type;
+            if (processed.project_tag) patch.project_tag = processed.project_tag;
+            await db(`entries?id=eq.${entryId}`, "PATCH", patch);
+            return `Entry logged.\n\nClaim: ${processed.claim}`;
+          }
+        }
+      } catch { /* claim generation failed — raw entry is saved */ }
+
+      return `Entry logged. ID: ${entryId}`;
     }
 
     case "get_my_builds": {
