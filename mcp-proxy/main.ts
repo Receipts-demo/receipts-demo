@@ -280,7 +280,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .replace(/\//g, "_")
       .replace(/=/g, "");
 
-    await kv.set(["code", code], {
+    await kv.set(`code:${code}`, {
       access_token,
       code_challenge,
       code_challenge_method,
@@ -289,7 +289,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       state,
     } as AuthCode, { expireIn: KV_TTL });
 
-    console.log("[approve] stored code in KV:", code, "key: code:", code);
+    console.log("[approve] stored code in KV:", code, "key:", `code:${code}`);
 
     // One-time use — delete the auth request
     await kv.delete(["auth", state]);
@@ -308,22 +308,31 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (path === "/oauth/token" && req.method === "POST") {
     console.log("[token] POST /oauth/token", req.headers.get("content-type"));
 
-    let params: Record<string, string> = {};
-    const contentType = req.headers.get("content-type") ?? "";
     const rawBody = await req.text();
     console.log("[token] raw body:", rawBody);
 
+    let code: string;
+    let code_verifier: string;
+    let grant_type: string;
+    let client_id: string;
+
+    const contentType = req.headers.get("content-type") ?? "";
     if (contentType.includes("application/json")) {
-      try {
-        params = JSON.parse(rawBody);
-      } catch { /* ignore */ }
+      let json: Record<string, string> = {};
+      try { json = JSON.parse(rawBody); } catch { /* ignore */ }
+      code = json.code ?? "";
+      code_verifier = json.code_verifier ?? "";
+      grant_type = json.grant_type ?? "";
+      client_id = json.client_id ?? "";
     } else {
-      const form = new URLSearchParams(rawBody);
-      for (const [k, v] of form.entries()) params[k] = v;
+      const params = new URLSearchParams(rawBody);
+      code = params.get("code") ?? "";
+      code_verifier = params.get("code_verifier") ?? "";
+      grant_type = params.get("grant_type") ?? "";
+      client_id = params.get("client_id") ?? "";
     }
 
-    const { code, code_verifier, grant_type, client_id } = params;
-    console.log("[token] grant_type:", grant_type, "code:", code?.slice(0, 16), "has_verifier:", !!code_verifier);
+    console.log("[token] grant_type:", grant_type, "code:", code, "has_verifier:", !!code_verifier);
 
     if (grant_type !== "authorization_code") {
       console.log("[token] error: unsupported_grant_type", grant_type);
@@ -334,9 +343,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonError(400, "invalid_request", "missing code or code_verifier");
     }
 
-    const codeEntry = await kv.get<AuthCode>(["code", code]);
+    console.log("[token] looking up KV key:", `code:${code}`);
+    const codeEntry = await kv.get<AuthCode>(`code:${code}`);
     if (!codeEntry.value) {
-      console.log("[token] error: code not found in KV:", code?.slice(0, 8));
+      console.log("[token] error: code not found in KV for key:", `code:${code}`);
       return jsonError(400, "invalid_grant", "unknown or expired code");
     }
 
@@ -357,7 +367,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // One-time use — delete the code
-    await kv.delete(["code", code]);
+    await kv.delete(`code:${code}`);
 
     const tokenResponse = {
       access_token,
