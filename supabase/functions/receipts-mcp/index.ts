@@ -270,8 +270,18 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
         .join("\n");
       const winLines = (p.key_wins ?? []).map((w) => `- ${w}`).join("\n");
       const tools = (p.tools_used ?? []).join(", ") || "—";
-      const winsForPrompt = (p.key_wins ?? []).join(". ");
-      const claudePrompt = `I want to build ${p.goal}. Here's what my colleague learned: ${winsForPrompt}. ${p.one_line_learning ?? ""}. Help me build my version.`;
+      const wins = p.key_wins ?? [];
+      const toolsList = (p.tools_used ?? []).join(", ");
+      const promptLines = [`I want to build: ${p.goal}`, ``];
+      if (toolsList) promptLines.push(`Tools to use: ${toolsList}`, ``);
+      if (wins.length) {
+        promptLines.push(`What worked:`);
+        wins.forEach((w) => promptLines.push(`- ${w}`));
+        promptLines.push(``);
+      }
+      if (p.one_line_learning) promptLines.push(`Key learning: ${p.one_line_learning}`, ``);
+      promptLines.push(`Help me build my version.`);
+      const claudePrompt = promptLines.join("\n");
       // Save prompt back to projects table so the shipped card UI can display it
       try {
         await db(

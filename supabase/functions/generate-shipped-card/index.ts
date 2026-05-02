@@ -117,7 +117,18 @@ Return ONLY valid JSON:
       };
     }
 
-    const copyPrompt = `I want to build ${project.goal ?? project.name}. Here's what my colleague learned: ${(parsed.key_wins ?? []).join(". ")}. ${parsed.one_line_learning ?? ""}. Help me build my version.`;
+    const wins = parsed.key_wins ?? [];
+    const toolsList = (parsed.tools_used ?? []).join(", ");
+    const promptLines = [`I want to build: ${project.goal ?? project.name}`, ``];
+    if (toolsList) promptLines.push(`Tools to use: ${toolsList}`, ``);
+    if (wins.length) {
+      promptLines.push(`What worked:`);
+      wins.forEach((w) => promptLines.push(`- ${w}`));
+      promptLines.push(``);
+    }
+    if (parsed.one_line_learning) promptLines.push(`Key learning: ${parsed.one_line_learning}`, ``);
+    promptLines.push(`Help me build my version.`);
+    const copyPrompt = promptLines.join("\n");
 
     // Update project row
     const { data: updated, error: updateError } = await supabase
