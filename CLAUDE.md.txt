@@ -21,7 +21,7 @@ Supabase project: kxkynhbulfxkibwmwrwl (Central EU)
 - AI level assessment: Claude Haiku via assess-ai-level edge function
 - Auth: Supabase Auth email/password — COMPLETE (April 15 2026)
 
-## Current State (April 19 2026)
+## Current State (May 2 2026)
 Working features:
 - Landing page with waitlist (emails saved to Supabase)
 - Voice recording via ElevenLabs STT → two save options:
@@ -47,6 +47,7 @@ Working features:
 - Shipped card public page at /shipped/[project_id]
   - Public for anon + authenticated users via RLS
   - Shows key_wins, one_line_learning, tools_used, AI Native level badge
+  - copy_prompt field populated — ready to wire up "Copy this build" button in UI
   - Profile page shows shipped builds portfolio
 - Workspace system fully deployed:
   - workspaces, workspace_members, workspace_invites, workspace_feed tables
@@ -68,13 +69,23 @@ Working features:
   relative timestamp; collapses to single truncated line
 - Onboarding flow at /onboarding (4 screens: hook, Q1, Q2, reveal) with
   confetti, animated level reveal, voice level reveal, profile save
-- Login.tsx checks onboarding_complete on profiles table and redirects to
-  /onboarding if false
+  - All three exit points (Log build, See profile, Skip) check oauth_redirect
+    and complete OAuth flow if present, otherwise navigate normally
+- Login.tsx handles oauth_redirect param for MCP connector flow:
+  - When oauth_redirect in URL: shows "Connect to Claude" heading +
+    Sign in / Sign up tab strip (new users can create account inline)
+  - After sign in: checks onboarding_complete — incomplete users sent to
+    /onboarding?oauth_redirect=... first; complete users redirected with JWT
+  - After sign up: sent to /onboarding?oauth_redirect=... to complete profile
+  - Already-logged-in users: redirected immediately via useEffect
 - ProtectedRoute uses verifiedPath pattern to prevent stale redirect on navigation
+- MCP: 9 tools live at mcp.receipts.tools (see MCP Integration section)
+  - log_entry, get_my_builds, update_build_status, add_idea (original 4)
+  - create_build, get_entries, get_shipped_card, search_builds, copy_build (new May 2)
 
 Known issues:
-- generate-shipped-card edge function not auto-inserting into workspace_feed
-  (manual SQL workaround in place for now — needs fixing next session)
+- generate-shipped-card workspace_feed auto-insert still failing silently
+  (manual SQL workaround in place — needs investigating)
 - Project pills not showing on post-submit receipt card (Lovable sync issue)
 - Orb on My Builds page doesn't have assign-to-project flow yet
 
@@ -121,6 +132,8 @@ Table: projects
 - key_wins (text[]) — 3 punchy wins, Claude-generated
 - one_line_learning (text) — single learning sentence, Claude-generated
 - tools_used (text[]) — tools/APIs extracted from entries
+- copy_prompt (text) — Claude prompt for "copy this build"; written by
+  generate-shipped-card at ship time and by copy_build MCP tool on demand
 - RLS: owners can read/write their own; anon + authenticated can SELECT
   where status = 'Shipped'
 
@@ -149,12 +162,13 @@ Edge functions deployed:
 - transcribe-audio (ElevenLabs scribe_v2 STT proxy; --no-verify-jwt)
 - text-to-speech (ElevenLabs eleven_multilingual_v2 TTS proxy; --no-verify-jwt)
 - generate-shipped-card (Claude Haiku; fetches project + entries, generates key_wins/
-  one_line_learning/tools_used, sets shipped_at + status='Shipped'; posts to
-  workspace_feed if owner has workspace_id; --no-verify-jwt)
+  one_line_learning/tools_used/copy_prompt, sets shipped_at + status='Shipped';
+  posts to workspace_feed if owner has workspace_id; --no-verify-jwt)
 - create-workspace (creates workspace + member + invite + updates profile; auth via
   Bearer token → supabase.auth.getUser(token); --no-verify-jwt)
 - join-workspace (validates invite code, checks expiry, upserts member, updates
   profile workspace_id; --no-verify-jwt)
+- receipts-mcp (MCP Streamable HTTP, 9 tools, Bearer JWT auth; --no-verify-jwt)
 
 All edge functions: JWT verification disabled via supabase/config.toml + --no-verify-jwt flag
 All edge functions: claude-haiku-4-5-20251001 (cost reduction from Sonnet)
@@ -294,6 +308,43 @@ Goal: Log entries directly from Claude conversations without opening the app
   key ["auth", state] stores PKCE params + access_token
 - ✅ claude.ai connected end-to-end — MCP tools working in production
 
+### MCP Tools (9 total)
+Original 4:
+- log_entry(text, project_id?) — logs entry, calls process-entry to generate claim
+- get_my_builds() — lists caller's projects with status + entry count
+- update_build_status(project_id, status) — patches project status
+- add_idea(text) — saves to ideas table
+
+Added May 2 2026:
+- create_build(name, goal, status?) — creates project, owner_id = caller,
+  default status "In Progress"
+- get_entries(project_id) — fetches caller's entries for a project, ordered by
+  created_at; returns id, claim, entry_type, created_at, raw_transcript
+- get_shipped_card(project_id) — fetches any shipped project's card (no owner
+  filter — public by design); returns goal, key_wins, one_line_learning, tools_used
+- search_builds(query) — fetches caller's projects, filters in Deno by name or
+  tools_used substring match (PostgREST cs filter doesn't do partial array match)
+- copy_build(project_id) — fetches any project + entries (no owner filter —
+  teammates can copy colleagues' builds); formats structured markdown doc + saves
+  copy_prompt to projects table; returns the doc ready to paste into Claude
+
+### copy_prompt format
+Structured multi-line block written to projects.copy_prompt by both
+generate-shipped-card (at ship time) and copy_build MCP tool (on demand):
+
+  I want to build: {goal}
+
+  Tools to use: {tools_used, comma-joined}   ← omitted if empty
+
+  What worked:
+  - {key_wins[0]}
+  - {key_wins[1]}
+  - {key_wins[2]}                            ← only items that exist
+
+  Key learning: {one_line_learning}           ← omitted if empty
+
+  Help me build my version.
+
 ### Deno Deploy env vars required
 - SUPABASE_ANON_KEY — used to validate Supabase JWTs at /oauth/callback
 - CODE_SECRET — any 32+ char random string, used to derive AES-GCM key
@@ -314,15 +365,31 @@ Goal: Log entries directly from Claude conversations without opening the app
 11. claude.ai uses JWT as Bearer token on all MCP calls
 12. receipts-mcp resolveUser() validates JWT via Supabase /auth/v1/user
 
+### New user OAuth flow (added May 2 2026)
+New users arriving from claude.ai MCP connector can create an account inline:
+1. Login page detects oauth_redirect param → shows "Connect to Claude" heading
+   + Sign in / Sign up tab strip
+2. Sign up tab: creates account via supabase.auth.signUp, then redirects to
+   /onboarding?oauth_redirect={encoded}
+3. Onboarding completes → finishAndRedirect helper checks oauth_redirect →
+   gets session → window.location.href = ${oauth_redirect}&access_token=${token}
+4. All three onboarding exit points (Log build, See profile, Skip) go through
+   finishAndRedirect so the OAuth flow always completes
+
 ### Lovable frontend contract
-Login page (/login) — detect oauth_redirect param after successful sign-in:
-  const oauthRedirect = new URLSearchParams(window.location.search).get('oauth_redirect');
-  if (oauthRedirect) {
-    const { data: { session } } = await supabase.auth.getSession();
-    window.location.href = `${oauthRedirect}&access_token=${session.access_token}`;
-  }
-  Also: if user already has session and oauth_redirect is present, skip login UI
-  and redirect immediately.
+Login page (/login):
+- Detects oauth_redirect param; shows Sign in / Sign up tabs when present
+- Sign in path: after auth, checks onboarding_complete; sends incomplete users
+  to /onboarding?oauth_redirect=... first
+- Sign up path: after account creation, sends to /onboarding?oauth_redirect=...
+- Already-logged-in: useEffect fires immediately, same onboarding check applies
+
+Onboarding page (/onboarding):
+- Reads oauth_redirect from URL search params
+- finishAndRedirect(fallback) helper used at all 3 exit points:
+  if oauth_redirect → supabase.auth.getSession() →
+    window.location.href = `${oauth_redirect}&access_token=${token}`
+  else → navigate(fallback)
 
 Consent page (/oauth/consent) — POST state to proxy, redirect on approval:
   const state = new URLSearchParams(window.location.search).get('state');
@@ -381,6 +448,8 @@ MCP OAuth is live. Remaining MCP items:
 - ⬜ Update demo video to show MCP connection flow
 - ⬜ Add personal API token display to Profile page (user copies JWT to connect
      without OAuth — simpler path for power users)
+- ⬜ Wire up "Copy this build" button on shipped card UI in Lovable (copy_prompt
+     field is populated — just needs fetching and rendering)
 
 Sprint 5 backlog:
 - ⬜ Fix generate-shipped-card workspace_feed auto-insert
@@ -407,6 +476,10 @@ Sprint 5 backlog:
 - Workspace feed uses parallel Supabase lookups (not join) to avoid FK alias issues
 - Edge functions identify caller via supabase.auth.getUser(Bearer token) with
   service role client — SUPABASE_ANON_KEY is NOT auto-injected into edge functions
+- copy_build MCP tool has no owner_id filter — teammates can copy any project
+  (get_entries keeps owner_id filter; raw entries stay private)
+- search_builds filters in Deno code, not PostgREST, because tools_used is text[]
+  and PostgREST cs filter only does exact element match, not substring
 
 ## Product Vision
 - MCP is the non-negotiable foundation — without it Receipts is a note taker
