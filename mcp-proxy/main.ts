@@ -139,7 +139,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
-
+// ── Favicon ────────────────────────────────────────────────────────────────
+  if (path === "/favicon.ico" || path === "/favicon.png") {
+    return Response.redirect(
+      "https://kxkynhbulfxkibwmwrwl.supabase.co/storage/v1/object/public/public-assets/receipts-logo-mcp.png",
+      302,
+    );
+  }
   // ── OAuth Protected Resource Metadata ──────────────────────────────────────
   // claude.ai fetches this first to discover which authorization server to use.
   // We now point to ourselves (the proxy) instead of Supabase.
