@@ -95,6 +95,63 @@ const TOOLS = [
       required: ["text"],
     },
   },
+  {
+    name: "create_build",
+    description: "Create a new build (project) in Receipts. You own it automatically.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Name of the build" },
+        goal: { type: "string", description: "What you're trying to achieve" },
+        status: { type: "string", description: "Initial status — defaults to 'In Progress'" },
+      },
+      required: ["name", "goal"],
+    },
+  },
+  {
+    name: "get_entries",
+    description: "Fetch all entries for one of your builds, ordered by date.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "UUID of the project" },
+      },
+      required: ["project_id"],
+    },
+  },
+  {
+    name: "get_shipped_card",
+    description: "Get the shipped card for any project — key wins, one-line learning, tools used. Only works if the project status is Shipped.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "UUID of the project" },
+      },
+      required: ["project_id"],
+    },
+  },
+  {
+    name: "search_builds",
+    description: "Search your builds by name or tools used.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search term — matched against project name and tools used" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "copy_build",
+    description: "Copy any shipped build as a ready-to-use markdown document with a Claude prompt at the bottom. Works for your own builds and teammates' shipped builds.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "UUID of the project to copy" },
+      },
+      required: ["project_id"],
+    },
+  },
 ];
 
 async function callTool(name: string, args: Record<string, unknown>, userId: string): Promise<string> {
@@ -142,6 +199,106 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
       }) as Array<{ id: string }>;
       const idea = Array.isArray(result) ? result[0] : result as { id?: string };
       return `Idea saved. ID: ${idea?.id ?? "unknown"}`;
+    }
+
+    case "create_build": {
+      const result = await db("projects", "POST", {
+        name: args.name as string,
+        goal: args.goal as string,
+        status: (args.status as string) ?? "In Progress",
+        owner_id: userId,
+        created_at: new Date().toISOString(),
+      }) as Array<{ id: string }>;
+      const project = Array.isArray(result) ? result[0] : result as { id?: string };
+      return `Build created. ID: ${project?.id ?? "unknown"}`;
+    }
+
+    case "get_entries": {
+      const entries = await db(
+        `entries?project_id=eq.${args.project_id as string}&owner_id=eq.${userId}&select=id,claim,entry_type,created_at,raw_transcript&order=created_at.asc`,
+        "GET"
+      ) as Array<{ id: string; claim: string; entry_type: string | null; created_at: string; raw_transcript: string }>;
+      if (!entries.length) return "No entries found for this project.";
+      return entries
+        .map((e) => `[${e.entry_type ?? "log"}] ${e.created_at.slice(0, 10)}: ${e.claim ?? e.raw_transcript}`)
+        .join("\n");
+    }
+
+    case "get_shipped_card": {
+      const projects = await db(
+        `projects?id=eq.${args.project_id as string}&status=eq.Shipped&select=id,name,goal,key_wins,one_line_learning,tools_used`,
+        "GET"
+      ) as Array<{ id: string; name: string; goal: string; key_wins: string[] | null; one_line_learning: string | null; tools_used: string[] | null }>;
+      if (!projects.length) return "Project not found or not yet shipped.";
+      const p = projects[0];
+      const wins = (p.key_wins ?? []).map((w) => `  • ${w}`).join("\n");
+      const tools = (p.tools_used ?? []).join(", ") || "—";
+      return `# ${p.name}\nGoal: ${p.goal}\nTools: ${tools}\n\nKey wins:\n${wins}\n\nOne-line learning: ${p.one_line_learning ?? "—"}`;
+    }
+
+    case "search_builds": {
+      const projects = await db(
+        `projects?owner_id=eq.${userId}&select=id,name,status,tools_used,entries(count)`,
+        "GET"
+      ) as Array<{ id: string; name: string; status: string | null; tools_used: string[] | null; entries: Array<{ count: number }> }>;
+      const q = (args.query as string).toLowerCase();
+      const matches = projects.filter((p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.tools_used ?? []).some((t) => t.toLowerCase().includes(q))
+      );
+      if (!matches.length) return `No builds found matching "${args.query as string}".`;
+      return matches
+        .map((p) => `• ${p.name} [${p.status ?? "active"}] — ${p.entries?.[0]?.count ?? 0} entries  (id: ${p.id})`)
+        .join("\n");
+    }
+
+    case "copy_build": {
+      const [projects, entries] = await Promise.all([
+        db(
+          `projects?id=eq.${args.project_id as string}&select=id,name,goal,key_wins,one_line_learning,tools_used`,
+          "GET"
+        ) as Promise<Array<{ id: string; name: string; goal: string; key_wins: string[] | null; one_line_learning: string | null; tools_used: string[] | null }>>,
+        db(
+          `entries?project_id=eq.${args.project_id as string}&select=claim,entry_type,created_at&order=created_at.asc`,
+          "GET"
+        ) as Promise<Array<{ claim: string; entry_type: string | null; created_at: string }>>,
+      ]);
+      if (!(projects as Array<unknown>).length) return "Build not found.";
+      const p = (projects as Array<{ id: string; name: string; goal: string; key_wins: string[] | null; one_line_learning: string | null; tools_used: string[] | null }>)[0];
+      const entryLines = (entries as Array<{ claim: string; entry_type: string | null; created_at: string }>)
+        .map((e) => `- [${e.entry_type ?? "log"}] ${e.claim}`)
+        .join("\n");
+      const winLines = (p.key_wins ?? []).map((w) => `- ${w}`).join("\n");
+      const tools = (p.tools_used ?? []).join(", ") || "—";
+      const winsForPrompt = (p.key_wins ?? []).join(". ");
+      const claudePrompt = `I want to build ${p.goal}. Here's what my colleague learned: ${winsForPrompt}. ${p.one_line_learning ?? ""}. Help me build my version.`;
+      // Save prompt back to projects table so the shipped card UI can display it
+      try {
+        await db(
+          `projects?id=eq.${args.project_id as string}`,
+          "PATCH",
+          { copy_prompt: claudePrompt }
+        );
+      } catch {
+        // best effort — don't fail the tool call if the write fails
+      }
+      const doc = [
+        `# ${p.name}`,
+        `**Goal:** ${p.goal}`,
+        `**Tools used:** ${tools}`,
+        ``,
+        `## What was built`,
+        entryLines || "_No entries_",
+        ``,
+        `## What was learned`,
+        winLines || "_No wins recorded_",
+        `**One-line learning:** ${p.one_line_learning ?? "—"}`,
+        ``,
+        `---`,
+        `*Paste this into Claude:*`,
+        claudePrompt,
+      ].join("\n");
+      return doc;
     }
 
     default:
