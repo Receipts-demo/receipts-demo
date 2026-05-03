@@ -149,6 +149,18 @@ CODE_SECRET         - 32+ char random string for AES-GCM auth code encryption
 
 ---
 
+## Troubleshooting
+
+**Connection issues** — Disconnect the connector in Claude Settings and reconnect. This refreshes the session and clears any stale state.
+
+**Auth errors / "Invalid token"** — Sign out of your Receipts account and sign back in, then reconnect the Claude connector to get a fresh token.
+
+**Tools not appearing in Claude** — Go to **Settings > Connectors** in claude.ai and confirm the Receipts connector is toggled on. If it shows as connected but tools are missing, try disconnecting and reconnecting.
+
+**Still stuck?** Email [get.receipts.ai@gmail.com](mailto:get.receipts.ai@gmail.com)
+
+---
+
 ## Links
 
 - App: [receipts.tools](https://receipts.tools)
