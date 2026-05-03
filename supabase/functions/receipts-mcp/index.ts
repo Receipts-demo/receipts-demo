@@ -54,6 +54,7 @@ const TOOLS = [
   {
     name: "log_entry",
     description: "Log a new entry to Receipts. Pass the raw text and an optional project UUID to assign it immediately.",
+    annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -66,6 +67,7 @@ const TOOLS = [
   {
     name: "get_my_builds",
     description: "Returns all projects owned by you with their status and entry count.",
+    annotations: { readOnlyHint: true },
     inputSchema: {
       type: "object",
       properties: {},
@@ -75,6 +77,7 @@ const TOOLS = [
   {
     name: "update_build_status",
     description: "Update the status of one of your projects. Common values: active, Shipped, archived.",
+    annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -87,6 +90,7 @@ const TOOLS = [
   {
     name: "add_idea",
     description: "Save a new idea to the Receipts ideas table.",
+    annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -98,6 +102,7 @@ const TOOLS = [
   {
     name: "create_build",
     description: "Create a new build (project) in Receipts. You own it automatically.",
+    annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -111,6 +116,7 @@ const TOOLS = [
   {
     name: "get_entries",
     description: "Fetch all entries for one of your builds, ordered by date.",
+    annotations: { readOnlyHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -122,6 +128,7 @@ const TOOLS = [
   {
     name: "get_shipped_card",
     description: "Get the shipped card for any project — key wins, one-line learning, tools used. Only works if the project status is Shipped.",
+    annotations: { readOnlyHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -133,6 +140,7 @@ const TOOLS = [
   {
     name: "search_builds",
     description: "Search your builds by name or tools used.",
+    annotations: { readOnlyHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -144,6 +152,7 @@ const TOOLS = [
   {
     name: "copy_build",
     description: "Copy any shipped build as a ready-to-use markdown document with a Claude prompt at the bottom. Works for your own builds and teammates' shipped builds.",
+    annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
       properties: {
