@@ -21,6 +21,22 @@ Supabase project: kxkynhbulfxkibwmwrwl (Central EU)
 - AI level assessment: Claude Haiku via assess-ai-level edge function
 - Auth: Supabase Auth email/password — COMPLETE (April 15 2026)
 
+## Product Principles
+
+These are the foundational beliefs that guide how Receipts is built. When making product decisions, refer to these before reaching for tactics. Captured in the "Receipts Product Principles" build (project_id: 8a461f9c-3ab0-4fb2-835b-bb0bbb41d7f0).
+
+1. **Capture is cheap, synthesis is rich.** Entries are low-friction in-the-moment capture — one moment, a working sentence or two. Shipped cards are where the build comes alive — voice-noted reflection at ship time, expandable journey of entries beneath. Two surfaces, two jobs, never blur them.
+
+2. **Tool descriptions are Receipts' voice in every conversation, everywhere.** They're the only piece of UI that runs inside other products. Each tool description is a chance to teach Claude — and through Claude, the user — how to use Receipts well. Not documentation. Manners.
+
+3. **The holy trinity for build selection.** Every Receipts launch build must serve distribution (clear external signal that people want it), dogfooding (building it produces meaningful Receipts entries), and utility (I'd use it myself). If a build doesn't pass all three, it doesn't ship.
+
+### What these principles imply (and what to resist)
+
+- Resist features that polish entries (tags, categories, edit-after-the-fact) — they fight principle 1 by raising friction at capture time
+- Resist features that make entries social (likes, reactions, public entry feeds) — they turn entries into curated content instead of raw material
+- Resist tool descriptions that just say what the tool does — every description should also teach how to use it well
+
 ## Current State (May 2 2026)
 Working features:
 - Landing page with waitlist (emails saved to Supabase)
