@@ -470,6 +470,8 @@ Sprint 5 backlog:
 - Fix generate-shipped-card workspace_feed auto-insert (currently failing silently — manual SQL workaround in place)
 - Mobile optimisation pass (BuildLog card layout fixed April 22 2026, more polish needed)
 - Clickable project page with full entry analysis
+- Voice reflection at ship time: when user transitions a build to "Shipped," prompt for a 2-3 minute voice note covering what shipped, what went wrong, what was learned, who it's for. Feeds into shipped card narrative summary.
+- Product philosophy locked in: entries are low-friction in-the-moment capture, shipped cards are rich synthesis. Tool descriptions, UI affordances, and AI prompts should reinforce this split rather than blur it.
 
 ### Sprint validation work (May-July 2026)
 - Reddit scraper run May 5: 218 relevant posts across 11 subreddits (r/ChatGPT, r/LocalLLaMA, r/AItools rate-limited mid-run). r/ClaudeAI dominant by volume but entertainment-heavy. r/SaaS and r/B2Bmarketing identified as primary B2B builder signal channels.
