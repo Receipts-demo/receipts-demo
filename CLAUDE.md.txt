@@ -459,6 +459,30 @@ Sprint 5 backlog:
 - ⬜ Clickable project page with full entry analysis
 - ⬜ Gamification: points, badges, leaderboard (designed above, not yet built)
 
+## Backlog (post-sprint)
+
+### Product
+- Rewrite all 9 MCP tool descriptions as opinionated briefs that teach Claude how to use Receipts well — log_entry should specify one decision per entry, create_build should push output-framed goals not methodology, update_build_status should opinionate on when to ship, etc
+- Add delete_entry MCP tool — delete function exists in UI feed but not via MCP
+- Layered shipped card: keep current glanceable front (goal, key_wins, one_line_learning, tools_used) and add expandable journey timeline showing chronological entries below
+- Generate-shipped-card narrative summary — one-paragraph "story of this build" rendered between the glanceable card and the full journey
+- Public profile URL for sharing (/p/:username or similar)
+- Fix generate-shipped-card workspace_feed auto-insert (currently failing silently — manual SQL workaround in place)
+- Mobile optimisation pass (BuildLog card layout fixed April 22 2026, more polish needed)
+- Clickable project page with full entry analysis
+
+### Sprint validation work (May-July 2026)
+- Reddit scraper run May 5: 218 relevant posts across 11 subreddits (r/ChatGPT, r/LocalLLaMA, r/AItools rate-limited mid-run). r/ClaudeAI dominant by volume but entertainment-heavy. r/SaaS and r/B2Bmarketing identified as primary B2B builder signal channels.
+- 5 launch builds picked from data:
+  1. ICP Synthesis from Sales Calls (response to r/B2Bmarketing #10 ABM Rant)
+  2. Cold Email Enrichment Stack at $3/1k contacts (response to r/B2Bmarketing #12 Clay replacement post)
+  3. GEO Content Audit Playbook (response to r/B2Bmarketing #8 + #13)
+  4. Competitor Pricing & Positioning Monitor
+  5. SaaS Compliance Doc First-Drafter / SOC 2 readiness (response to r/SaaS #6 Shasta post)
+- Operating principle for build selection: every build must serve distribution (Reddit signal), dogfooding (produces meaningful Receipts entries), and utility (I'd use it myself). Called the "holy trinity."
+- Dual ICP locked in: B2B marketers AND SaaS-builder-operators. Heavy overlap in the data — builds 1-3 lean marketing, 4-5 lean founder, all five viable for both audiences.
+- High-signal posts to revisit for outreach in week 4 (not as build sources but as ICP validation): r/SaaS #2 (vibe coding regret), r/SaaS #10 (burnout, "nothing to show for it"), r/B2Bmarketing #2 (marketing is turning into engineering identity crisis).
+
 ## Key Product Decisions Made
 - ElevenLabs chosen for both STT (scribe_v2) and TTS (eleven_multilingual_v2)
   — multilingual, auto-detect, better than Web Speech API on mobile
