@@ -37,10 +37,12 @@ interface AuthRequest {
   code_challenge: string;
   code_challenge_method: string;
   access_token?: string; // populated after /oauth/callback
+  refresh_token?: string; // populated after /oauth/callback
 }
 
 interface AuthCode {
   access_token: string;
+  refresh_token: string;
   code_challenge: string;
   code_challenge_method: string;
   client_id: string;
@@ -121,6 +123,31 @@ async function validateSupabaseToken(token: string): Promise<boolean> {
   return res.ok;
 }
 
+async function refreshSupabaseToken(refresh_token: string): Promise<{ access_token: string; refresh_token: string } | null> {
+  if (!SUPABASE_ANON_KEY) {
+    console.log("[refresh] no SUPABASE_ANON_KEY configured");
+    return null;
+  }
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify({ refresh_token }),
+  });
+  if (!res.ok) {
+    console.log("[refresh] supabase refresh failed:", res.status);
+    return null;
+  }
+  const data = await res.json();
+  if (!data.access_token || !data.refresh_token) {
+    console.log("[refresh] supabase response missing tokens");
+    return null;
+  }
+  return { access_token: data.access_token, refresh_token: data.refresh_token };
+}
+
 // ─── Response Helpers ─────────────────────────────────────────────────────────
 
 function jsonError(status: number, error: string, description?: string): Response {
@@ -170,7 +197,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       token_endpoint: `${MCP_URL}/oauth/token`,
       registration_endpoint: `${MCP_URL}/oauth/register`,
       response_types_supported: ["code"],
-      grant_types_supported: ["authorization_code"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
       code_challenge_methods_supported: ["S256"],
       scopes_supported: ["openid", "email"],
       token_endpoint_auth_methods_supported: ["none"],
@@ -264,12 +291,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (path === "/oauth/callback" && req.method === "GET") {
     const state = url.searchParams.get("state") ?? "";
     const access_token = url.searchParams.get("access_token") ?? "";
+    const refresh_token = url.searchParams.get("refresh_token") ?? "";
 
     if (!state || !access_token) {
       return new Response("Bad Request: missing state or access_token", { status: 400 });
     }
 
-    console.log("[callback] received state:", state.slice(0, 12), "has_token:", !!access_token);
+    console.log("[callback] received state:", state.slice(0, 12), "has_token:", !!access_token, "has_refresh:", !!refresh_token);
 
     const entry = await kv.get<AuthRequest>(["auth", state]);
     if (!entry.value) {
@@ -285,13 +313,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return new Response("Unauthorized: invalid Supabase token", { status: 401 });
     }
 
-    // Attach the token to the stored auth request
+    // Attach the tokens to the stored auth request
     await kv.set(["auth", state], {
       ...entry.value,
       access_token,
+      refresh_token,
     } as AuthRequest, { expireIn: KV_TTL });
 
-    console.log("[callback] token stored, redirecting to consent");
+    console.log("[callback] tokens stored, redirecting to consent");
     const consentUrl = new URL(CONSENT_URL);
     consentUrl.searchParams.set("state", state);
 
@@ -326,11 +355,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonError(400, "invalid_request", "no token on record — callback step may not have completed");
     }
 
-    const { client_id, redirect_uri, code_challenge, code_challenge_method, access_token } =
+    const { client_id, redirect_uri, code_challenge, code_challenge_method, access_token, refresh_token } =
       entry.value;
 
     const code = await encryptCode({
       access_token,
+      refresh_token: refresh_token ?? "",
       code_challenge,
       code_challenge_method,
       client_id,
@@ -364,6 +394,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     let code_verifier: string;
     let grant_type: string;
     let client_id: string;
+    let refresh_token_in: string;
 
     const contentType = req.headers.get("content-type") ?? "";
     if (contentType.includes("application/json")) {
@@ -373,16 +404,39 @@ Deno.serve(async (req: Request): Promise<Response> => {
       code_verifier = json.code_verifier ?? "";
       grant_type = json.grant_type ?? "";
       client_id = json.client_id ?? "";
+      refresh_token_in = json.refresh_token ?? "";
     } else {
       const params = new URLSearchParams(rawBody);
       code = params.get("code") ?? "";
       code_verifier = params.get("code_verifier") ?? "";
       grant_type = params.get("grant_type") ?? "";
       client_id = params.get("client_id") ?? "";
+      refresh_token_in = params.get("refresh_token") ?? "";
     }
 
-    console.log("[token] grant_type:", grant_type, "code:", code, "has_verifier:", !!code_verifier);
+    console.log("[token] grant_type:", grant_type);
 
+    // ── Refresh token grant ──────────────────────────────────────────────────
+    if (grant_type === "refresh_token") {
+      if (!refresh_token_in) {
+        return jsonError(400, "invalid_request", "missing refresh_token");
+      }
+      const refreshed = await refreshSupabaseToken(refresh_token_in);
+      if (!refreshed) {
+        console.log("[token] refresh failed");
+        return jsonError(400, "invalid_grant", "refresh token invalid or expired");
+      }
+      console.log("[token] refresh success, returning new tokens");
+      return Response.json({
+        access_token: refreshed.access_token,
+        refresh_token: refreshed.refresh_token,
+        token_type: "bearer",
+        expires_in: 3600,
+        scope: "openid email",
+      }, { headers: corsHeaders });
+    }
+
+    // ── Authorization code grant ─────────────────────────────────────────────
     if (grant_type !== "authorization_code") {
       console.log("[token] error: unsupported_grant_type", grant_type);
       return jsonError(400, "unsupported_grant_type");
@@ -399,7 +453,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonError(400, "invalid_grant", "invalid or expired code");
     }
 
-    const { access_token, code_challenge, code_challenge_method } = payload;
+    const { access_token, refresh_token, code_challenge, code_challenge_method } = payload;
 
     if (client_id && payload.client_id !== client_id) {
       console.log("[token] error: client_id mismatch", client_id, "vs", payload.client_id);
@@ -410,18 +464,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (code_challenge_method === "S256") {
       const computed = await sha256Base64Url(code_verifier);
       if (computed !== code_challenge) {
-        console.log("[token] error: PKCE mismatch — computed:", computed, "expected:", code_challenge);
+        console.log("[token] error: PKCE mismatch");
         return jsonError(400, "invalid_grant", "PKCE verification failed");
       }
     }
 
-    const tokenResponse = {
+    const tokenResponse: Record<string, unknown> = {
       access_token,
       token_type: "bearer",
       expires_in: 3600,
       scope: "openid email",
     };
-    console.log("[token] success — returning token, expires_in: 3600, token_prefix:", access_token?.slice(0, 20));
+    if (refresh_token) {
+      tokenResponse.refresh_token = refresh_token;
+    }
+    console.log("[token] success — returning token, has_refresh:", !!refresh_token);
 
     return Response.json(tokenResponse, { headers: corsHeaders });
   }
