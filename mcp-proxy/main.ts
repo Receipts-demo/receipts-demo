@@ -345,7 +345,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     console.log("[approve] received state:", state.slice(0, 12));
 
-    const entry = await kv.get<AuthRequest>(["auth", state]);
+    const entry = await kv.get<AuthRequest>(["auth", state], { consistency: "strong" });
     if (!entry.value) {
       console.log("[approve] error: state not found in KV");
       return jsonError(400, "invalid_request", "unknown or expired state");
