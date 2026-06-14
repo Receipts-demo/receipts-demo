@@ -313,16 +313,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return new Response("Unauthorized: invalid Supabase token", { status: 401 });
     }
 
-    // Attach the tokens to the stored auth request
-    await kv.set(["auth", state], {
-      ...entry.value,
+    // Encrypt the full approval payload — /oauth/approve decrypts it directly,
+    // no KV lookup needed at approve time.
+    const approvalToken = await encryptCode({
       access_token,
-      refresh_token,
-    } as AuthRequest, { expireIn: KV_TTL });
+      refresh_token: refresh_token ?? "",
+      code_challenge: entry.value.code_challenge,
+      code_challenge_method: entry.value.code_challenge_method,
+      client_id: entry.value.client_id,
+      redirect_uri: entry.value.redirect_uri,
+      state,
+    });
+    await kv.delete(["auth", state]);
 
-    console.log("[callback] tokens stored, redirecting to consent");
+    console.log("[callback] approval token encrypted, redirecting to consent");
     const consentUrl = new URL(CONSENT_URL);
-    consentUrl.searchParams.set("state", state);
+    consentUrl.searchParams.set("state", approvalToken);
 
     return Response.redirect(consentUrl.toString(), 302);
   }
@@ -345,18 +351,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     console.log("[approve] received state:", state.slice(0, 12));
 
-    const entry = await kv.get<AuthRequest>(["auth", state], { consistency: "strong" });
-    if (!entry.value) {
-      console.log("[approve] error: state not found in KV");
-      return jsonError(400, "invalid_request", "unknown or expired state");
-    }
-    if (!entry.value.access_token) {
-      console.log("[approve] error: no access_token in KV entry — callback may not have run");
-      return jsonError(400, "invalid_request", "no token on record — callback step may not have completed");
+    const approvalPayload = await decryptCode(state);
+    if (!approvalPayload) {
+      console.log("[approve] error: state decryption failed — invalid or expired approval token");
+      return jsonError(400, "invalid_request", "invalid or expired approval token");
     }
 
-    const { client_id, redirect_uri, code_challenge, code_challenge_method, access_token, refresh_token } =
-      entry.value;
+    const { client_id, redirect_uri, code_challenge, code_challenge_method, access_token, refresh_token,
+      state: originalState } = approvalPayload;
 
     const code = await encryptCode({
       access_token,
@@ -365,17 +367,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       code_challenge_method,
       client_id,
       redirect_uri,
-      state,
+      state: originalState,
     });
 
     console.log("[approve] encrypted code length:", code.length);
 
-    // One-time use — delete the auth request
-    await kv.delete(["auth", state]);
-
     const redirectUrl = new URL(redirect_uri);
     redirectUrl.searchParams.set("code", code);
-    redirectUrl.searchParams.set("state", state);
+    redirectUrl.searchParams.set("state", originalState);
 
     return Response.json({ redirectTo: redirectUrl.toString() }, { headers: corsHeaders });
   }
