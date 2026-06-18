@@ -53,7 +53,21 @@ function rpcError(id: unknown, code: number, message: string): Response {
 const TOOLS = [
   {
     name: "log_entry",
-    description: "Log a new entry to Receipts. Pass the raw text and an optional project UUID to assign it immediately.",
+    title: "Log a build entry",
+    description: `Use this to log a single moment, decision, or piece of progress to a build.
+One entry = one moment. Do not bundle multiple decisions into one entry.
+
+Trigger phrases: "log this", "save this to X", "add an entry", "note this down",
+"capture this decision", "record what I just did", "log my progress on X".
+
+Workflow rule: ALWAYS call get_my_builds first if you don't have an exact
+project_id. Never guess a project_id from a name - confirm it first.
+
+Good entry: "Decided to use Supabase over Firebase because of row-level security."
+Bad entry: "Worked on the project today."
+
+The text should capture the decision or action and the reason behind it, in the
+user's own words. Encourage specificity but don't rewrite what they said.`,
     annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -65,8 +79,40 @@ const TOOLS = [
     },
   },
   {
+    name: "delete_entry",
+    title: "Delete a build entry",
+    description: `Use this to delete a specific entry from a build.
+Always call get_entries first to confirm the entry_id and show
+the user what will be deleted before calling this tool.
+Never delete without confirming with the user which entry is being removed.
+One entry deleted cannot be recovered.`,
+    annotations: { destructiveHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        entry_id: { type: "string", description: "UUID of the entry to delete" },
+      },
+      required: ["entry_id"],
+    },
+  },
+  {
     name: "get_my_builds",
-    description: "Returns all projects owned by you with their status and entry count.",
+    title: "Get my builds",
+    description: `Use this to find, get, fetch, retrieve, list, show, grab, pull up, or browse
+the user's builds. Call this whenever the user wants to see their work in any
+form - even if they haven't said "search."
+
+Trigger phrases include (but are not limited to):
+"what builds do I have", "show me my projects", "what am I working on",
+"get my builds", "fetch my builds", "grab my builds", "find my builds",
+"bring up my builds", "what have I built", "list my work", "overview of my builds",
+"which build should I log to", "what's in Receipts", "open Receipts".
+
+Workflow rule: always call this BEFORE log_entry when the user hasn't provided
+an exact project_id. Confirm the correct build with the user before logging.
+
+Pass an empty string or broad term to return all builds.
+Pass a name fragment to filter by name or tools used.`,
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: "object",
@@ -76,7 +122,19 @@ const TOOLS = [
   },
   {
     name: "update_build_status",
-    description: "Update the status of one of your projects. Common values: active, Shipped, archived.",
+    title: "Update build status",
+    description: `Use this to change the status of a build. Valid statuses are:
+"In Progress", "Paused", "Shipped", "Dropped".
+
+Trigger phrases: "mark X as shipped", "I shipped X", "pause X", "drop X",
+"X is done", "archive X", "I finished X", "update status of X".
+
+Workflow rule: when the user says a build is done or shipped, suggest generating
+a shipped card via the app before updating status - the narrative and key wins
+are generated at ship time and can't be recovered from status alone.
+
+Confirm the correct build with get_my_builds before updating if project_id
+is not provided.`,
     annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -89,7 +147,18 @@ const TOOLS = [
   },
   {
     name: "add_idea",
-    description: "Save a new idea to the Receipts ideas table.",
+    title: "Add an idea",
+    description: `Use this to capture an idea before it becomes a build. Ideas live in the
+Ideas tab in Receipts - they are not builds yet.
+
+Trigger phrases: "add an idea", "save this idea", "note this for later",
+"I had a thought about X", "capture this before I forget", "idea: X".
+
+Keep the text as close to what the user said as possible. Don't over-structure.
+An idea is raw material, not a polished brief.
+
+If the user wants to turn an idea into a build immediately, use create_build
+instead and skip add_idea.`,
     annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -101,7 +170,19 @@ const TOOLS = [
   },
   {
     name: "create_build",
-    description: "Create a new build (project) in Receipts. You own it automatically.",
+    title: "Create a build",
+    description: `Use this to start a new build, project, or piece of work in Receipts.
+Call this when the user wants to create something new to track.
+
+Trigger phrases: "create a build", "start a new project", "add a build called X",
+"I want to track X", "new build for X", "set up a project for X".
+
+The goal field is important - push back on vague goals. A good goal names a
+specific deliverable a stranger could understand: not "work on marketing" but
+"build a cold email sequence that books 5 demos a week." Reject stub goals.
+
+Default status is "In Progress". Only set status to "Shipped" when the user
+explicitly says the build is done.`,
     annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -115,7 +196,16 @@ const TOOLS = [
   },
   {
     name: "get_entries",
-    description: "Fetch all entries for one of your builds, ordered by date.",
+    title: "Get build entries",
+    description: `Use this to show the history, entries, logs, or timeline of a specific build.
+Call this when the user wants to see what they've captured inside a build,
+review their progress, or understand what's already been logged.
+
+Trigger phrases: "what have I logged on X", "show me the entries for X",
+"what's in this build", "review my progress on X", "history of X".
+
+Workflow rule: call get_my_builds first if you don't have the project_id.
+Returns entries ordered oldest to newest - good for reading a build's story.`,
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: "object",
@@ -127,7 +217,16 @@ const TOOLS = [
   },
   {
     name: "get_shipped_card",
-    description: "Get the shipped card for any project — key wins, one-line learning, tools used. Only works if the project status is Shipped.",
+    title: "Get shipped card",
+    description: `Use this to read a finished shipped card for any build - yours or a teammate's.
+Call this when the user wants to see the summary, key wins, learnings, or tools
+used on a completed build.
+
+Trigger phrases: "show me the card for X", "what did we ship on X",
+"read the shipped card", "what were the key wins on X", "summarise build X".
+
+Note: no ownership filter - any shipped card is readable by anyone in the workspace.
+This is by design. Shipped cards are public proof of work.`,
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: "object",
@@ -139,7 +238,18 @@ const TOOLS = [
   },
   {
     name: "search_builds",
-    description: "Search your builds by name or tools used.",
+    title: "Search my builds",
+    description: `Use this to search across all of the user's own builds by name or keyword.
+Broader than get_my_builds - optimised for keyword matching rather than browsing.
+
+Trigger phrases: "search my builds for X", "find builds about X",
+"any builds involving X", "which of my builds used X tool",
+"do I have anything on X".
+
+Pass a query of 2+ characters to filter by name or tools used.
+Pass an empty string or single character to return ALL builds (broad browse intent).
+
+Scope: caller's own builds only. For team search, use search_workspace_cards.`,
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: "object",
@@ -151,7 +261,20 @@ const TOOLS = [
   },
   {
     name: "copy_build",
-    description: "Copy any shipped build as a ready-to-use markdown document with a Claude prompt at the bottom. Works for your own builds and teammates' shipped builds.",
+    title: "Copy a build",
+    description: `Use this to get a ready-to-paste prompt for replicating a build. Returns a
+structured document with the goal, recommended approach, trade-offs, and a
+prompt the user can paste into a new Claude conversation to start building.
+
+Trigger phrases: "copy this build", "I want to build something like X",
+"how did X build Y", "replicate build X", "use X as a template",
+"start from the same approach as X".
+
+No ownership filter - any build can be copied by any workspace member.
+This is intentional: copying is how knowledge spreads through a team.
+
+After returning the copy prompt, tell the user to paste it into a new
+Claude conversation to start building their version.`,
     annotations: { destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -159,6 +282,31 @@ const TOOLS = [
         project_id: { type: "string", description: "UUID of the project to copy" },
       },
       required: ["project_id"],
+    },
+  },
+  {
+    name: "search_workspace_cards",
+    title: "Search workspace builds",
+    description: `Use this to search shipped builds across the entire workspace - not just the
+caller's own work. Returns cards from all team members who have shipped builds.
+
+Trigger phrases: "search the team's work for X", "find workspace builds about X",
+"what has the team shipped on X", "any team builds using X",
+"search across the workspace", "find shared builds about X",
+"what's been shipped here on X".
+
+Filters by name, goal, or tools used. Returns project_id, name, goal,
+tools_used, top key win, and one-line learning for each match.
+
+Scope: whole workspace, shipped builds only. Drafts and in-progress builds
+are not included. For the user's own unshipped work, use search_builds.`,
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search term — matched against build name, goal, and tools used" },
+      },
+      required: ["query"],
     },
   },
 ];
@@ -178,6 +326,17 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
       const result = await db("entries", "POST", row) as Array<{ id: string }>;
       const entry = Array.isArray(result) ? result[0] : result as { id?: string };
       return `Entry logged. ID: ${entry?.id ?? "unknown"}`;
+    }
+
+    case "delete_entry": {
+      const deleted = await db(
+        `entries?id=eq.${args.entry_id as string}&owner_id=eq.${userId}`,
+        "DELETE"
+      ) as Array<{ id: string }>;
+      if (!Array.isArray(deleted) || !deleted.length) {
+        return `Entry not found or does not belong to you. No entry was deleted.`;
+      }
+      return `Entry deleted. ID: ${args.entry_id as string}`;
     }
 
     case "get_my_builds": {
@@ -229,7 +388,7 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
       ) as Array<{ id: string; claim: string; entry_type: string | null; created_at: string; raw_transcript: string }>;
       if (!entries.length) return "No entries found for this project.";
       return entries
-        .map((e) => `[${e.entry_type ?? "log"}] ${e.created_at.slice(0, 10)}: ${e.claim ?? e.raw_transcript}`)
+        .map((e) => `[${e.entry_type ?? "log"}] ${e.created_at.slice(0, 10)}: ${e.claim ?? e.raw_transcript}  (id: ${e.id})`)
         .join("\n");
     }
 
@@ -251,11 +410,11 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
         "GET"
       ) as Array<{ id: string; name: string; status: string | null; tools_used: string[] | null; entries: Array<{ count: number }> }>;
       const q = (args.query as string).toLowerCase();
-      const matches = projects.filter((p) =>
+      const matches = q.length < 2 ? projects : projects.filter((p) =>
         p.name.toLowerCase().includes(q) ||
         (p.tools_used ?? []).some((t) => t.toLowerCase().includes(q))
       );
-      if (!matches.length) return `No builds found matching "${args.query as string}".`;
+      if (!matches.length) return q.length < 2 ? "No builds found." : `No builds found matching "${args.query as string}".`;
       return matches
         .map((p) => `• ${p.name} [${p.status ?? "active"}] — ${p.entries?.[0]?.count ?? 0} entries  (id: ${p.id})`)
         .join("\n");
@@ -318,6 +477,53 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
         claudePrompt,
       ].join("\n");
       return doc;
+    }
+
+    case "search_workspace_cards": {
+      const profiles = await db(
+        `profiles?id=eq.${userId}&select=workspace_id`,
+        "GET"
+      ) as Array<{ workspace_id: string | null }>;
+      const workspaceId = profiles[0]?.workspace_id ?? null;
+      if (!workspaceId) return "You are not a member of any workspace.";
+
+      const feedRows = await db(
+        `workspace_feed?workspace_id=eq.${workspaceId}&event_type=eq.shipped&select=project_id`,
+        "GET"
+      ) as Array<{ project_id: string }>;
+      if (!feedRows.length) return "No shipped builds found in your workspace.";
+
+      const ids = feedRows.map((r) => r.project_id).join(",");
+      const projects = await db(
+        `projects?id=in.(${ids})&select=id,name,goal,tools_used,key_wins,one_line_learning`,
+        "GET"
+      ) as Array<{
+        id: string;
+        name: string;
+        goal: string | null;
+        tools_used: string[] | null;
+        key_wins: string[] | null;
+        one_line_learning: string | null;
+      }>;
+
+      const q = (args.query as string).toLowerCase();
+      const matches = projects.filter((p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.goal ?? "").toLowerCase().includes(q) ||
+        (p.tools_used ?? []).some((t) => t.toLowerCase().includes(q))
+      );
+      if (!matches.length) return `No workspace builds found matching "${args.query as string}".`;
+      return matches.map((p) => {
+        const tools = (p.tools_used ?? []).join(", ") || "—";
+        const topWin = p.key_wins?.[0] ?? "—";
+        return [
+          `• ${p.name}  (id: ${p.id})`,
+          `  Goal: ${p.goal ?? "—"}`,
+          `  Tools: ${tools}`,
+          `  Top win: ${topWin}`,
+          `  Learning: ${p.one_line_learning ?? "—"}`,
+        ].join("\n");
+      }).join("\n\n");
     }
 
     default:
