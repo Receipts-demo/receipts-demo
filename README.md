@@ -168,3 +168,5 @@ CODE_SECRET         - 32+ char random string for AES-GCM auth code encryption
 - App: [receipts.tools](https://receipts.tools)
 - MCP server: `https://mcp.receipts.tools`
 - Frontend repo: [Receipts-demo/get-receipts](https://github.com/Receipts-demo/get-receipts)
+- Privacy policy: [receipts.tools/privacy](https://receipts.tools/privacy)
+- Terms: [receipts.tools/terms](https://receipts.tools/terms)
