@@ -12,7 +12,7 @@ MCP server: `https://mcp.receipts.tools`
 This repo (`Receipts-demo/receipts-demo`) holds the backend for Receipts:
 
 - `supabase/functions/` - Supabase Edge Functions (Deno)
-  - `receipts-mcp/` - the hosted MCP server (9 tools, OAuth 2.1)
+  - `receipts-mcp/` - the hosted MCP server (11 tools, OAuth 2.1)
   - `process-entry/` - Claude Haiku claim generation
   - `assess-ai-level/` - AI Native level assessment
   - `transcribe-audio/` - ElevenLabs STT proxy
@@ -36,7 +36,7 @@ The Receipts MCP server is hosted and requires no installation.
 1. Go to **Settings > Connectors** in claude.ai
 2. Add a custom connector with URL: `https://mcp.receipts.tools`
 3. Sign in or create a Receipts account when prompted
-4. Done - all 9 tools are available in your Claude conversations
+4. Done - all 11 tools are available in your Claude conversations
 
 ### Option 2 - Personal API token (power users)
 
@@ -63,6 +63,8 @@ All tools require authentication. The caller's identity is resolved from the Bea
 | `search_builds(query)` | Search your builds by name or tools used. |
 | `copy_build(project_id)` | Get a structured "copy this build" prompt for any shipped project. Teammates can copy colleagues' builds. |
 | `add_idea(text)` | Save an idea directly to your ideas board. |
+| `delete_entry(entry_id)` | Delete a specific entry from a build. Requires confirmation — always shows the entry before deleting. |
+| `search_workspace_cards(query)` | Search shipped builds across your entire workspace by name, goal, or tools used. |
 
 ### Example usage in Claude
 
