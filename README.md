@@ -97,7 +97,7 @@ mcp.receipts.tools          <- Deno Deploy proxy (mcp-proxy/main.ts)
    v
 Supabase Edge Function      <- receipts-mcp/index.ts
    |  - MCP Streamable HTTP (JSON-RPC 2.0)
-   |  - 9 tools
+   |  - 11 tools
    |  - JWT auth via supabase.auth.getUser()
    |
    v
