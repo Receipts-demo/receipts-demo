@@ -65,10 +65,16 @@ Deno.serve(async (req: Request) => {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 200,
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 300,
       system:
-        "You are a professional build logger. Take this raw note and turn it into a single precise claim statement - one sentence describing what was built, decided, or originated, written as professional evidence. Return only the claim, nothing else. Respond in the same language as the input transcript. If the transcript is in German, write the claim in German. If in English, write in English. If the input is too short, is a greeting, or does not contain enough information to generate a meaningful build claim, return a gentle fallback instead: in English return 'A note was logged.' and in German return 'Eine Notiz wurde gespeichert.' Never return phrases like 'I cannot create' or 'I cannot generate' — always return a short, neutral claim.",
+        `You are a build logger. Given a raw note from someone building with AI, return a JSON object with exactly these fields:
+
+- claim: one punchy sentence capturing what happened (past tense, specific, no filler). Respond in the same language as the input transcript.
+- entry_type: one of build / decision / idea / shipped / dropped / log
+- tags: array of 1-3 short lowercase kebab-case tags describing the topic, audience, or intent. Examples: product-questions, commercial-signals, icp-research, explore-beta, usability-feedback, pricing-concern. Infer from content. Never leave empty.
+
+Return only valid JSON. No markdown. No backticks. No explanation. If the input is too short or is a greeting, return: {"claim":"A note was logged.","entry_type":"log","tags":["general"]}`,
       messages: [{ role: "user", content: userMessage }],
     }),
   });
@@ -82,24 +88,29 @@ Deno.serve(async (req: Request) => {
   }
 
   const anthropicData = await anthropicRes.json();
-  const claim: string = anthropicData.content?.[0]?.text?.trim() ?? "";
+  const rawText: string = anthropicData.content?.[0]?.text?.trim() ?? "";
 
-  // Derive project_tag from the first tool_tag if present, otherwise null
-  const project_tag: string | null = tool_tags.length > 0 ? tool_tags[0] : null;
+  let claim = "";
+  let entry_type = "build";
+  let tags: string[] = [];
 
-  // Derive entry_type heuristically from the claim text
-  const lowerClaim = claim.toLowerCase();
-  let entry_type: string;
-  if (lowerClaim.includes("decided") || lowerClaim.includes("decision")) {
-    entry_type = "decision";
-  } else if (lowerClaim.includes("originated") || lowerClaim.includes("created") || lowerClaim.includes("established")) {
-    entry_type = "origin";
-  } else {
-    entry_type = "build";
+  try {
+    const stripped = rawText
+      .replace(/```json\n?/g, "")
+      .replace(/```\n?/g, "")
+      .trim();
+    const parsed = JSON.parse(stripped);
+    claim = parsed.claim ?? "";
+    entry_type = parsed.entry_type ?? "build";
+    tags = Array.isArray(parsed.tags) ? parsed.tags : [];
+  } catch {
+    claim = rawText;
   }
 
+  const project_tag: string | null = tool_tags.length > 0 ? tool_tags[0] : null;
+
   return new Response(
-    JSON.stringify({ claim, project_tag, entry_type }),
+    JSON.stringify({ claim, project_tag, entry_type, tags }),
     {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

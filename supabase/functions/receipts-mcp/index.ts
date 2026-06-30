@@ -60,8 +60,11 @@ One entry = one moment. Do not bundle multiple decisions into one entry.
 Trigger phrases: "log this", "save this to X", "add an entry", "note this down",
 "capture this decision", "record what I just did", "log my progress on X".
 
-Workflow rule: ALWAYS call get_my_builds first if you don't have an exact
-project_id. Never guess a project_id from a name - confirm it first.
+Workflow rule: if a project_id is not explicitly provided, call search_builds
+with the project name from the user's message BEFORE calling log_entry.
+If search_builds returns more than one match, list all matches to the user
+and ask them to confirm which project to log to. Do not call log_entry until
+a single project_id is confirmed. Never guess when names are similar.
 
 Good entry: "Decided to use Supabase over Firebase because of row-level security."
 Bad entry: "Worked on the project today."
@@ -249,6 +252,9 @@ Trigger phrases: "search my builds for X", "find builds about X",
 Pass a query of 2+ characters to filter by name or tools used.
 Pass an empty string or single character to return ALL builds (broad browse intent).
 
+If multiple builds match the query, return all matches and ask the user to confirm
+which one before logging. Never pick one silently when names are similar.
+
 Scope: caller's own builds only. For team search, use search_workspace_cards.`,
     annotations: { readOnlyHint: true },
     inputSchema: {
@@ -285,6 +291,41 @@ Claude conversation to start building their version.`,
     },
   },
   {
+    name: "get_transcript",
+    title: "Get transcripts for a build",
+    description: `Use this to retrieve transcripts recorded against a build — meeting recordings
+or personal notes captured in Receipts and attached to a project.
+
+Trigger phrases: "pull the transcript for X", "show me the meeting notes on X",
+"what was discussed in the call about X", "get my notes from the X project",
+"fetch the transcript from Tuesday", "read the meeting transcript for X".
+
+Returns each transcript with its title, summary, type, duration, full raw text,
+and created date. raw_text is the complete unedited transcript — use it directly
+to work on the content in this conversation (e.g. extract decisions, log entries,
+answer questions the user has about what was said).
+
+Workflow rule: after retrieving a transcript, use log_entry to save any decisions
+or actions back to the same project_id so they appear in the build history.
+
+Access rules:
+- You always see all transcripts on your own builds.
+- On a teammate's build (project status = Shared), you only see transcripts
+  the owner has marked shared. If some exist but aren't shared, the response
+  tells you how many are hidden — that is intentional, not a missing recording.
+
+transcript_type filter is optional. Omit to return all types.`,
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "UUID of the project" },
+        transcript_type: { type: "string", description: "Optional filter: 'meeting' or 'personal_note'" },
+      },
+      required: ["project_id"],
+    },
+  },
+  {
     name: "search_workspace_cards",
     title: "Search workspace builds",
     description: `Use this to search shipped builds across the entire workspace - not just the
@@ -314,6 +355,10 @@ are not included. For the user's own unshipped work, use search_builds.`,
 async function callTool(name: string, args: Record<string, unknown>, userId: string): Promise<string> {
   switch (name) {
     case "log_entry": {
+      console.log('log_entry called with:', JSON.stringify(args));
+      if (!args.project_id) {
+        return "No project_id provided. Call get_my_builds to show the user their builds, then ask them to confirm which project_id to use, then call log_entry again with the confirmed project_id.";
+      }
       const row: Record<string, unknown> = {
         raw_transcript: args.text as string,
         claim: args.text as string,
@@ -325,7 +370,40 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
       if (args.project_id) row.project_id = args.project_id;
       const result = await db("entries", "POST", row) as Array<{ id: string }>;
       const entry = Array.isArray(result) ? result[0] : result as { id?: string };
-      return `Entry logged. ID: ${entry?.id ?? "unknown"}`;
+      const entryId = entry?.id;
+
+      // Best-effort: call process-entry to generate claim, entry_type, tags
+      if (entryId) {
+        try {
+          const peRes = await fetch(`${SUPABASE_URL}/functions/v1/process-entry`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SERVICE_ROLE_KEY,
+              Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+            },
+            body: JSON.stringify({ transcript: args.text as string }),
+          });
+          if (peRes.ok) {
+            const pe = await peRes.json() as { claim?: string; entry_type?: string; tags?: string[]; project_tag?: string };
+            if (!pe.skip) {
+              await db(
+                `entries?id=eq.${entryId}`,
+                "PATCH",
+                {
+                  claim: pe.claim ?? args.text,
+                  entry_type: pe.entry_type ?? "build",
+                  tags: pe.tags ?? [],
+                }
+              );
+            }
+          }
+        } catch {
+          // raw entry already saved — don't fail the tool call
+        }
+      }
+
+      return `Entry logged. ID: ${entryId ?? "unknown"}`;
     }
 
     case "delete_entry": {
@@ -382,14 +460,25 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
     }
 
     case "get_entries": {
-      const entries = await db(
-        `entries?project_id=eq.${args.project_id as string}&owner_id=eq.${userId}&select=id,claim,entry_type,created_at,raw_transcript&order=created_at.asc`,
-        "GET"
-      ) as Array<{ id: string; claim: string; entry_type: string | null; created_at: string; raw_transcript: string }>;
+      const [entries, profiles] = await Promise.all([
+        db(
+          `entries?project_id=eq.${args.project_id as string}&owner_id=eq.${userId}&select=id,claim,entry_type,created_at,raw_transcript,tags&order=created_at.asc`,
+          "GET"
+        ) as Promise<Array<{ id: string; claim: string; entry_type: string | null; created_at: string; raw_transcript: string; tags: string[] | null }>>,
+        db(
+          `profiles?id=eq.${userId}&select=display_name`,
+          "GET"
+        ) as Promise<Array<{ display_name: string | null }>>,
+      ]);
       if (!entries.length) return "No entries found for this project.";
+      const displayName = profiles[0]?.display_name ?? null;
       return entries
-        .map((e) => `[${e.entry_type ?? "log"}] ${e.created_at.slice(0, 10)}: ${e.claim ?? e.raw_transcript}  (id: ${e.id})`)
-        .join("\n");
+        .map((e) => {
+          const prefix = displayName ? `${displayName} - ` : "";
+          const tagStr = e.tags?.length ? `\ntags: ${e.tags.join(", ")}` : "";
+          return `[${e.entry_type ?? "log"}] ${e.created_at.slice(0, 10)}: ${prefix}${e.claim ?? e.raw_transcript}${tagStr}  (id: ${e.id})`;
+        })
+        .join("\n\n");
     }
 
     case "get_shipped_card": {
@@ -477,6 +566,88 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
         claudePrompt,
       ].join("\n");
       return doc;
+    }
+
+    case "get_transcript": {
+      const projectId = args.project_id as string;
+      const typeFilter = args.transcript_type as string | undefined;
+
+      // Gate: fetch project via service role (bypasses RLS) and check caller's access.
+      // Service role sees everything — we apply our own visibility rules below.
+      const projects = await db(
+        `projects?id=eq.${projectId}&select=id,name,status,owner_id`,
+        "GET"
+      ) as Array<{ id: string; name: string; status: string | null; owner_id: string }>;
+
+      if (!projects.length) return "Project not found.";
+      const project = projects[0];
+      const isOwner = project.owner_id === userId;
+      let isWorkspaceMember = false;
+
+      if (!isOwner) {
+        // Non-owners can only proceed if the project is Shared and they share a workspace
+        // with the owner. If not, return the same response as "not found" — no hidden_count,
+        // no signal that the project or its transcripts exist at all.
+        if (project.status !== "Shared") return "Project not found.";
+
+        const [callerProfiles, ownerProfiles] = await Promise.all([
+          db(`profiles?id=eq.${userId}&select=workspace_id`, "GET") as Promise<Array<{ workspace_id: string | null }>>,
+          db(`profiles?id=eq.${project.owner_id}&select=workspace_id`, "GET") as Promise<Array<{ workspace_id: string | null }>>,
+        ]);
+        const callerWs = callerProfiles[0]?.workspace_id ?? null;
+        const ownerWs  = ownerProfiles[0]?.workspace_id ?? null;
+
+        if (!callerWs || !ownerWs || callerWs !== ownerWs) return "Project not found.";
+        isWorkspaceMember = true;
+      }
+
+      // Fetch all transcripts for the project. Service role bypasses RLS so we get
+      // every row — owner and non-shared alike. We filter in code below.
+      let query = `transcripts?project_id=eq.${projectId}&select=id,title,transcript_type,summary,raw_text,duration_seconds,shared,created_at&order=created_at.desc`;
+      if (typeFilter === "meeting" || typeFilter === "personal_note") {
+        query += `&transcript_type=eq.${typeFilter}`;
+      }
+
+      const all = await db(query, "GET") as Array<{
+        id: string;
+        title: string | null;
+        transcript_type: string;
+        summary: string | null;
+        raw_text: string;
+        duration_seconds: number | null;
+        shared: boolean;
+        created_at: string;
+      }>;
+
+      if (!all.length) return "No transcripts found for this project.";
+
+      // Owner sees everything. Workspace member sees only shared = true.
+      const visible     = isOwner ? all : all.filter((t) => t.shared);
+      const hiddenCount = isOwner ? 0   : all.length - visible.length;
+
+      if (!visible.length) {
+        if (hiddenCount > 0) {
+          return `No shared transcripts for this project. ${hiddenCount} transcript${hiddenCount > 1 ? "s" : ""} exist but ${hiddenCount === 1 ? "has" : "have"} not been shared by the owner.`;
+        }
+        return "No transcripts found for this project.";
+      }
+
+      const lines = visible.map((t) => {
+        const mins = t.duration_seconds ? ` (${Math.round(t.duration_seconds / 60)}m)` : "";
+        const parts = [
+          `[${t.transcript_type}] ${t.created_at.slice(0, 10)}: ${t.title ?? "(untitled)"}${mins}`,
+        ];
+        if (t.summary) parts.push(`  Summary: ${t.summary}`);
+        parts.push(`  Full transcript:\n${t.raw_text}`);
+        parts.push(`  (id: ${t.id})`);
+        return parts.join("\n");
+      });
+
+      if (hiddenCount > 0) {
+        lines.push(`\n🔒 ${hiddenCount} transcript${hiddenCount > 1 ? "s" : ""} not shared — only the owner can see ${hiddenCount === 1 ? "it" : "them"}.`);
+      }
+
+      return lines.join("\n\n");
     }
 
     case "search_workspace_cards": {
