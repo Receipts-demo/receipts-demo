@@ -1,0 +1,133 @@
+Receipts — Tech Debt
+Things that work but shouldn't, workarounds that need replacing, and investigations we haven't finished. Updated as items are added or fixed.
+This file is read by Claude Code at the start of any session that touches auth, OAuth, MCP, edge functions, or migrations. If your task overlaps with a known debt item, flag it and ask whether to fix-while-you're-there or stay scoped.
+This is NOT a backlog (see CLAUDE.md "Backlog (post-sprint)" for product features). This is specifically about systems that function but have known deficiencies.
+
+Known issues (working, but on a workaround)
+2. Supabase migration history is out of sync with local migrations
+Logged: May 10 2026
+What: supabase db push fails because the remote migration history contains stale entries from a previous CLI session. The May 10 migration (adding summary column to projects) was applied via the Management API directly using supabase db query --linked.
+Why it's debt: Future migrations will hit the same wall. Each one either has to be applied via the Management API workaround (which means the local CLI never knows it ran) or the history needs reconciling. This will compound until we can't push migrations cleanly at all.
+Workaround: Apply migrations directly via Management API when push fails. Document each one in supabase/migrations/ for the record even though the CLI doesn't track them.
+Proper fix:
+	1	Run supabase migration list to see exactly which entries are mismatched between local and remote.
+	2	Use supabase migration repair --status applied <migration_name> to mark each stale-but-actually-applied migration as applied in the remote history.
+	3	For any genuinely missing local files, recreate them from the remote history so future devs have the full timeline.
+	4	Confirm supabase db push succeeds with a no-op after reconciling.
+Estimated effort: 30 min, low risk. Best done before the next migration.
+
+3. generate-shipped-card workspace_feed insert fails silently
+Logged: April 19 2026 (originally noted in CLAUDE.md known issues)
+Status as of July 11 2026: Explicit logging around the profile fetch and the workspace_feed insert (including the insert's own error object) is already in the deployed function — the first step of the proper fix below is done. Nobody has yet shipped a test build with a workspaced owner and read the resulting logs, so the actual root cause is still unconfirmed.
+What: When generate-shipped-card runs and the project owner has a workspace_id, the function should INSERT a row into workspace_feed with event_type='shipped'. This insert fails silently — no error in logs, no row appears in workspace_feed.
+Why it's debt: The Collaborate page feed is the centerpiece of the team experience. Right now shipped builds don't appear there automatically; they need a manual SQL insert.
+Workaround: Manual SQL insert into workspace_feed after each ship.
+Proper fix: Investigate. Possible causes:
+	•	RLS on workspace_feed blocking service-role inserts somehow
+	•	Race condition with the projects update committing before the workspace_feed insert
+	•	The owner's workspace_id is null at the moment generate-shipped-card reads the profile (unlikely but possible if a profile fetch is cached)
+Ship a test build with a workspaced owner and read the function logs in the Supabase dashboard - the logging is already in place, this just hasn't been done yet.
+Estimated effort: 30-60 min now that logging exists, down from the original 1-2 hour estimate.
+
+Deferred decisions (working, but worth reviewing)
+4. Edge functions all run with --no-verify-jwt
+Logged: May 10 2026
+Status as of July 11 2026: config.toml only declares verify_jwt = false for 3 of the 8 functions (assess-ai-level, process-transcript, receipts-mcp - process-transcript added since this was first logged). The other 5 (process-entry, transcribe-audio, text-to-speech, generate-shipped-card, create-workspace, join-workspace) must have been deployed with the --no-verify-jwt CLI flag directly, since config.toml has no record of them. That's a sharper version of this same debt: redeploying any of those 5 functions without remembering the flag would silently turn JWT verification back on with no config diff to catch it.
+What: Every edge function (process-entry, assess-ai-level, transcribe-audio, text-to-speech, generate-shipped-card, create-workspace, join-workspace, receipts-mcp, process-transcript) is deployed with --no-verify-jwt. Functions that need to know the caller manually call supabase.auth.getUser(token) with the service role client.
+Why it's debt: Manual auth verification in every function is duplicate code and a place where mistakes can sneak in. If one function forgets to verify, it has unrestricted access. Built-in JWT verification would centralise this. The config.toml gap means the CLI flag is the only record of intent for 5 of 9 functions.
+Why we did it this way: Some functions need to be callable by unauthenticated users (transcribe-audio for the public landing page demo, parts of the OAuth flow). --no-verify-jwt was the simplest path to mixed-auth functions.
+Worth reviewing: Audit each function. Tag which ones genuinely need unauthenticated access and which ones could use built-in verification. Add [functions.X] verify_jwt = false entries to config.toml for the 5 missing functions so intent is tracked in one place instead of split between config.toml and deploy-time memory. For the ones that could use real verification, consider splitting auth-required and auth-not-required into separate functions, or using the verify-jwt header pattern when Supabase SDK supports it cleanly.
+Estimated effort: 30 min to close the config.toml gap; 2-3 hours for the full audit + refactor. Not urgent, but worth doing before we add more edge functions.
+
+5. search_builds MCP tool filters in Deno code, not in Postgres
+Logged: May 2 2026
+What: The search_builds MCP tool fetches all of the caller's projects from Supabase, then filters in Deno by name or tools_used substring match.
+Why it's debt: Doesn't scale. Once a user has hundreds of projects, this fetches all of them on every call.
+Why we did it this way: PostgREST's cs (contains) filter on text[] columns only matches exact array elements, not substrings. To match "claude" against tools_used containing "claude-haiku", we need substring match, which PostgREST doesn't support cleanly on arrays.
+Worth reviewing: Two options if this becomes a scale issue:
+	1	Add a Postgres function (e.g. search_user_projects(query text)) that does the array-substring match in SQL and call it via RPC.
+	2	Add a tsvector column on projects with name + tools_used unnested, index it, and use full-text search.
+Not urgent. Trigger to act: any user reporting slow search, or projects table crossing ~10k rows for a single user.
+
+6. Tab navigation triggers full component remount and re-fetch
+Logged: June 14 2026
+What: Navigating between Record/My Builds/Collaborate/Profile re-fetches data from Supabase on every tab switch instead of serving from cache.
+Why it's debt: Unnecessary network round-trips on every navigation, visible loading flicker between tabs.
+Why we did it this way: Each page fetches its own data in a useEffect on mount — simple and correct, but no caching layer.
+Status as of July 11 2026: get-receipts already has @tanstack/react-query installed and QueryClientProvider wired up in App.tsx (shadcn scaffolding default) — it's just unused. Dashboard.tsx, BuildLog.tsx, and Ideas.tsx all still fetch via useEffect + supabase client calls directly, not useQuery. Adopting it is a per-page refactor, not a new dependency.
+Worth reviewing: Two options:
+	1	TanStack Query — provider already exists, just needs useQuery adopted per page. Lowest-effort option now.
+	2	Lift shared data (workspace, profile, builds) into a global Context or Zustand store, fetch once on login.
+Estimated effort: 1-3 hours now that the provider exists, down from the original 2-4 hour estimate. Not urgent — polish issue, no functional impact.
+
+8. entries.source column exists in prod with no migration file
+Logged: July 11 2026
+What: entries.source (text, nullable) exists in the live database and is actively used - values 'app' (Receipts UI writes), 'mcp' (MCP tool writes), and null (pre-July entries, deliberately never backfilled). It does not appear in any file under supabase/migrations/. It was added directly against prod, most likely via the Management API workaround described in item 2, and never captured in a migration file for the record.
+Why it's debt: Anyone reading supabase/migrations/ to understand the schema will not find this column. Anyone rebuilding the database from migrations alone (a fresh Supabase project, a disaster-recovery scenario) will be missing it, and every frontend insert and the human-involvement badge feature will silently break.
+Workaround: None needed for day-to-day work - the column is live and stable. This is purely a documentation/reproducibility gap.
+Proper fix: Write a migration file (e.g. supabase/migrations/20260711_entries_source.sql) with ALTER TABLE entries ADD COLUMN IF NOT EXISTS source text; so the column is captured for the record, matching the pattern already used for the summary column in item 2's history. Since the column already exists in prod, this migration will need to be reconciled the same way (documented but not re-run, or run with IF NOT EXISTS as a no-op).
+Estimated effort: 15 min.
+
+9. log_transcript's source param has nowhere real to live
+Logged: July 11 2026
+What: The transcripts table has no source column (see supabase/migrations/20260630_transcripts.sql). The MCP log_transcript tool accepts an optional source param (fireflies/otter/voice/pasted) and, since there's no column to put it in, prepends it to suggested_tags as a source:<value> string instead.
+Why it's debt: Source ends up mixed into a field meant for topic tags. Any UI or query that treats suggested_tags as pure topic data will need to know to filter out or specially handle a source:* entry. It also means source isn't queryable/filterable the way entries.source is.
+Why we did it this way: Avoided a schema migration (see item 2 - db push is broken) for a single-session feature add.
+Worth reviewing: Add a real source column to transcripts (same text/nullable shape as entries.source) via a migration, move the value there instead of into suggested_tags, and strip the source:* convention out of log_transcript's insert once the frontend/any readers of suggested_tags have been checked for reliance on it.
+Estimated effort: 30 min for the migration + tool update, plus time to confirm nothing reads suggested_tags expecting it to be tag-only.
+
+Investigations (not yet understood)
+
+7. MCP log_entry project_id gate bypassed via Claude context caching
+Logged: June 29 2026
+What: Claude caches project_id from earlier in a conversation and passes it directly to log_entry without calling get_my_builds first, bypassing the hard gate entirely. The gate works when project_id is genuinely absent, but Claude infers it from context and never triggers the rejection. Two fix attempts failed: tool description instruction and hard gate in the edge function. Suspected root cause: the request never reaches the Supabase function — Claude may be resolving project_id client-side before the call, or the Deno proxy is intercepting.
+Why it's debt: Will cause real user confusion at scale with similar build names. Users with builds like "HubSpot outreach" and "HubSpot sequences" will silently log to the wrong one.
+Workaround: Start sessions with get_my_builds and confirm project_id explicitly before logging.
+Proper fix: Not yet understood. Next investigation steps:
+	•	Confirm via function logs whether log_entry is being called with a project_id already set (Claude filling it) vs. being skipped entirely
+	•	If Claude is filling it: the fix must be in the MCP schema — mark project_id as not accepted (remove it from inputSchema) and have log_entry itself resolve the project via a required build_name param that always triggers a Supabase lookup
+	•	If the proxy is intercepting: inspect Deno proxy logs at mcp.receipts.tools to see what it passes through
+Estimated effort: Unknown — depends on investigation outcome. Must fix before pushing growth.
+
+Recently fixed (kept here briefly for memory, then deleted)
+Move items here when fixed; delete after a couple of weeks.
+
+### OAuth proxy strong-consistency KV read
+*Fixed: June 14 2026*
+
+/oauth/callback now encrypts {access_token, refresh_token, PKCE params} into an
+approvalToken using the existing AES-GCM helper and passes it as the state param
+to the consent page. /oauth/approve decrypts it directly — no KV lookup at approve
+time. KV is still used for PKCE params during /oauth/authorize → /oauth/callback
+only, and is deleted at the end of /oauth/callback.
+
+### Inconsistent capitalization on projects.status field
+*Logged: May 10 2026*
+
+**What:** Project status values were written inconsistently — most rows
+have `'Shipped'` (capital S), one row had `'shipped'` (lowercase).
+Discovered May 10 during the summary backfill.
+
+**Why it's debt:** The public shipped card route uses RLS that matches
+`status = 'Shipped'` exactly. Any lowercase row would be invisible to
+anonymous viewers. The lowercase row was a hidden-from-public-view bug
+that nobody noticed because the project owner could still see their own
+data via the owner_id RLS policy.
+
+**Workaround:** One-time UPDATE statement run May 10 to normalise all
+rows to `'Shipped'`. Data is now consistent.
+
+**Proper fix:** Find which code path wrote the lowercase value and
+normalise it. Likely candidates:
+- generate-shipped-card edge function — check the .update() call
+- An older manual SQL update somewhere in migration history
+- A Lovable component that sets status directly instead of going
+  through generate-shipped-card
+
+Once located, either fix the writer or add a CHECK constraint or trigger
+on the projects table to enforce `status IN ('In Progress', 'Shipped',
+'Dropped')` (or whatever the canonical set is). A CHECK constraint is
+the safest long-term fix because it catches any future writer that
+violates the convention.
+
+Estimated effort: 30 min to investigate + 15 min to add CHECK constraint.
