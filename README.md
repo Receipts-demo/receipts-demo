@@ -12,7 +12,7 @@ MCP server: `https://mcp.receipts.tools`
 This repo (`Receipts-demo/receipts-demo`) holds the backend for Receipts:
 
 - `supabase/functions/` - Supabase Edge Functions (Deno)
-  - `receipts-mcp/` - the hosted MCP server (11 tools, OAuth 2.1)
+  - `receipts-mcp/` - the hosted MCP server (13 tools, OAuth 2.1)
   - `process-entry/` - Claude Haiku claim generation
   - `assess-ai-level/` - AI Native level assessment
   - `transcribe-audio/` - ElevenLabs STT proxy
@@ -36,7 +36,7 @@ The Receipts MCP server is hosted and requires no installation.
 1. Go to **Settings > Connectors** in claude.ai
 2. Add a custom connector with URL: `https://mcp.receipts.tools`
 3. Sign in or create a Receipts account when prompted
-4. Done - all 11 tools are available in your Claude conversations
+4. Done - all 13 tools are available in your Claude conversations
 
 ### Option 2 - Personal API token (power users)
 
@@ -65,6 +65,8 @@ All tools require authentication. The caller's identity is resolved from the Bea
 | `add_idea(text)` | Save an idea directly to your ideas board. |
 | `delete_entry(entry_id)` | Delete a specific entry from a build. Requires confirmation — always shows the entry before deleting. |
 | `search_workspace_cards(query)` | Search shipped builds across your entire workspace by name, goal, or tools used. |
+| `get_transcript(project_id, transcript_type?)` | Retrieve meeting recordings or notes attached to a build, including the full raw text. |
+| `log_transcript(raw_text, project_id, title?, source?)` | Log a full meeting transcript or call recording (e.g. from Fireflies/Otter) to a build. Generates a title and summary but keeps the original text. |
 
 ### Example usage in Claude
 
@@ -97,7 +99,7 @@ mcp.receipts.tools          <- Deno Deploy proxy (mcp-proxy/main.ts)
    v
 Supabase Edge Function      <- receipts-mcp/index.ts
    |  - MCP Streamable HTTP (JSON-RPC 2.0)
-   |  - 11 tools
+   |  - 13 tools
    |  - JWT auth via supabase.auth.getUser()
    |
    v
