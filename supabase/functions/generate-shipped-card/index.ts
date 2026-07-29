@@ -62,8 +62,8 @@ serve(async (req) => {
     const entryText = (entries ?? [])
       .map((e, i) => {
         const parts = [`Entry ${i + 1} (${e.entry_type ?? "log"})`];
+        if (e.raw_transcript) parts.push(`Raw: ${e.raw_transcript}`);
         if (e.claim) parts.push(`Claim: ${e.claim}`);
-        else if (e.raw_transcript) parts.push(`Transcript: ${e.raw_transcript}`);
         if (e.tool_tags?.length) parts.push(`Tools: ${e.tool_tags.join(", ")}`);
         return parts.join("\n");
       })
@@ -71,14 +71,26 @@ serve(async (req) => {
 
     const systemPrompt = `You are analysing a builder's project entries to generate a shipped card.
 
-Use only plain ASCII hyphens (-) in all output. Never use em dashes (—) or en dashes (–) anywhere in the copy_prompt, narrative, key_wins, or any other field.
+Use only plain ASCII hyphens (-) in all output. Never use em dashes (—) or en dashes (–) anywhere in any field.
 
-From the entries provided, extract:
-- key_wins: array of exactly 3 short punchy wins (max 12 words each). These should be specific and concrete, referencing what was actually built or achieved.
-- one_line_learning: one honest sentence about the most important thing learned (max 20 words)
+Each entry below has a raw version and a compressed one-line claim. Raw entries are your primary evidence - mine them for the specific detail that makes a decision credible: numbers, names, what was considered and rejected. Claims are a fast anchor for what the core decision was, not a source of detail - use them to orient, not to quote. Raw entries may be messy (voice-dictated, mid-thought, informal); that is fine, but write every field below in clean, structured prose regardless of how rough the source is.
+
+First, identify the single most significant decision in this build and write it up across five fields. Write like a well-researched, well-sourced article: clear, specific, and grounded in what the entries actually say - not like a generic AI summary or marketing copy.
+
+- core_problem: the specific business problem being solved, in plain language a stranger would understand (not "improve performance," but what was actually broken or unclear).
+- core_evidence: what data, signal, or observation drove the decision. This is what separates a judgment call from a guess.
+- core_decision: what was actually decided or done, framed as a single decision.
+- rejected_alternatives: what else was considered and why it lost. If the entries don't show an explicit rejected alternative, say "no alternative was directly considered" rather than inventing one.
+- outcome_or_learning: lead with a measured outcome if one exists. If there isn't one yet, say so directly and give the learning instead. Never fabricate a result.
+
+Rules for the five fields above:
+- Every field must be traceable to something in the entries. Do not invent details, metrics, or outcomes that aren't supported by them.
+- Avoid empty superlatives ("game-changing," "seamless," "powerful"). If something worked, say specifically what changed and why.
+
+From the entries, also extract:
 - tools_used: array of any tools, APIs, or technologies mentioned across all entries
-- narrative: 2 to 3 sentences written in first person, plain and concrete. Explain what was built and why it mattered in terms a non-technical reader coming in cold would understand. No marketing language, no exclamation marks, no hype words. Do not repeat the goal verbatim. It complements the key wins - it does not list them.
-- summary: 3 to 5 sentences OR 3 to 5 bullet points describing what this build IS in plain language a stranger could understand. This is different from "goal" (what the builder was trying to achieve) and different from "key_wins" (what specifically worked). The summary is the "what is this" elevator description that helps a reader immediately understand the build. If the build is simple, 3 sentences of prose is fine. If it has multiple components or steps, use 3-5 bullet points. When using bullets, separate them with newlines so the frontend can detect and render them as a list. Example: "An ICP synthesizer that turns raw sales call transcripts into a structured 6-section persona doc. Every claim is grounded in a direct quote from the calls, no invention or paraphrase. The build is portable: the same prompt works on any messy human voice data including interviews, forum posts, and customer emails."
+- narrative: 2 to 3 sentences written in first person, plain and concrete. Explain what was built and why it mattered in terms a non-technical reader coming in cold would understand. No marketing language, no exclamation marks, no hype words. Do not repeat the goal verbatim. It complements the five-field decision record above - it does not repeat it.
+- summary: 3 to 5 sentences OR 3 to 5 bullet points describing what this build IS in plain language a stranger could understand. This is different from "goal" (what the builder was trying to achieve). The summary is the "what is this" elevator description that helps a reader immediately understand the build. If the build is simple, 3 sentences of prose is fine. If it has multiple components or steps, use 3-5 bullet points. When using bullets, separate them with newlines so the frontend can detect and render them as a list. Example: "An ICP synthesizer that turns raw sales call transcripts into a structured 6-section persona doc. Every claim is grounded in a direct quote from the calls, no invention or paraphrase. The build is portable: the same prompt works on any messy human voice data including interviews, forum posts, and customer emails."
 
 Also produce a "rewritten_goal" field. The original goal in the project record may be a half-formed early thought ("add custom connector"). Rewrite it as 1-2 clear sentences that describe what the builder set out to do, based on the entries. A stranger should understand the goal without context.
 
@@ -106,8 +118,11 @@ See the full build at https://receipts.tools/shipped/[project_id]
 
 Return ONLY valid JSON:
 {
-  "key_wins": string[],
-  "one_line_learning": string,
+  "core_problem": string,
+  "core_evidence": string,
+  "core_decision": string,
+  "rejected_alternatives": string,
+  "outcome_or_learning": string,
   "tools_used": string[],
   "narrative": string,
   "summary": string,
@@ -126,7 +141,7 @@ Return ONLY valid JSON:
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1200,
+        max_tokens: 1600,
         system: systemPrompt,
         messages: [{ role: "user", content: userMsg }],
       }),
@@ -146,14 +161,28 @@ Return ONLY valid JSON:
       .replace(/```\s*$/i, "")
       .trim();
 
-    let parsed: { key_wins: string[]; one_line_learning: string; tools_used: string[]; narrative: string; summary: string; rewritten_goal: string; copy_prompt: string };
+    let parsed: {
+      core_problem: string;
+      core_evidence: string;
+      core_decision: string;
+      rejected_alternatives: string;
+      outcome_or_learning: string;
+      tools_used: string[];
+      narrative: string;
+      summary: string;
+      rewritten_goal: string;
+      copy_prompt: string;
+    };
     try {
       parsed = JSON.parse(cleaned);
     } catch (e) {
       console.error("JSON parse failed, raw:", raw);
       parsed = {
-        key_wins: ["Project shipped", "Work completed", "Goal achieved"],
-        one_line_learning: "Every build teaches something new.",
+        core_problem: "",
+        core_evidence: "",
+        core_decision: "",
+        rejected_alternatives: "",
+        outcome_or_learning: "",
         tools_used: [],
         narrative: "",
         summary: "",
@@ -163,11 +192,17 @@ Return ONLY valid JSON:
     }
 
     // Update project row; rewritten_goal overwrites the goal column
+    // key_wins / one_line_learning are intentionally left untouched here -
+    // they're only ever populated by the old pre-rebuild extraction, kept
+    // for cards shipped before this change that haven't been regenerated.
     const { data: updated, error: updateError } = await supabase
       .from("projects")
       .update({
-        key_wins: parsed.key_wins ?? [],
-        one_line_learning: parsed.one_line_learning ?? "",
+        core_problem: parsed.core_problem ?? "",
+        core_evidence: parsed.core_evidence ?? "",
+        core_decision: parsed.core_decision ?? "",
+        rejected_alternatives: parsed.rejected_alternatives ?? "",
+        outcome_or_learning: parsed.outcome_or_learning ?? "",
         tools_used: parsed.tools_used ?? [],
         narrative: parsed.narrative ?? "",
         summary: parsed.summary ?? "",

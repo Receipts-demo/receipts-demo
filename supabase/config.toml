@@ -11,3 +11,12 @@ verify_jwt = false
 
 [functions.receipts-mcp]
 verify_jwt = false
+
+[functions.process-entry]
+verify_jwt = false
+
+[functions.transcribe-audio]
+verify_jwt = false
+
+[functions.generate-shipped-card]
+verify_jwt = false
