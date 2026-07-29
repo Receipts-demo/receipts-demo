@@ -32,12 +32,12 @@ Estimated effort: 30-60 min now that logging exists, down from the original 1-2 
 Deferred decisions (working, but worth reviewing)
 4. Edge functions all run with --no-verify-jwt
 Logged: May 10 2026
-Status as of July 11 2026: config.toml only declares verify_jwt = false for 3 of the 8 functions (assess-ai-level, process-transcript, receipts-mcp - process-transcript added since this was first logged). The other 5 (process-entry, transcribe-audio, text-to-speech, generate-shipped-card, create-workspace, join-workspace) must have been deployed with the --no-verify-jwt CLI flag directly, since config.toml has no record of them. That's a sharper version of this same debt: redeploying any of those 5 functions without remembering the flag would silently turn JWT verification back on with no config diff to catch it.
-What: Every edge function (process-entry, assess-ai-level, transcribe-audio, text-to-speech, generate-shipped-card, create-workspace, join-workspace, receipts-mcp, process-transcript) is deployed with --no-verify-jwt. Functions that need to know the caller manually call supabase.auth.getUser(token) with the service role client.
-Why it's debt: Manual auth verification in every function is duplicate code and a place where mistakes can sneak in. If one function forgets to verify, it has unrestricted access. Built-in JWT verification would centralise this. The config.toml gap means the CLI flag is the only record of intent for 5 of 9 functions.
+Status as of July 29 2026: the config.toml gap described below is now closed for Receipts-test - but the real shape of the problem turned out to be different from what this item originally assumed. There are two config.toml files, one per repo (Receipts-test and get-receipts), because both repos are linked to the same Supabase project (kxkynhbulfxkibwmwrwl) and functions get deployed from whichever repo happens to hold their code. get-receipts/supabase/config.toml already correctly declared verify_jwt = false for process-entry, transcribe-audio, text-to-speech, generate-shipped-card, create-workspace, and join-workspace - this item just didn't know that file existed. text-to-speech, create-workspace, and join-workspace only exist as code in get-receipts (last deployed April 19 2026, untouched since) and were never actually missing config. The real gap was 3 functions in Receipts-test/config.toml - process-entry, transcribe-audio, generate-shipped-card - the only ones both deployed from this repo and undeclared here. Added those 3 entries and redeployed all 6 of this repo's functions in one pass (supabase functions deploy --project-ref kxkynhbulfxkibwmwrwl); confirmed via curl that verify_jwt is still false without the CLI flag (500 on a bad project_id, not 401). This also caught a live near-miss: mid-way through the July 29 Shipped Card Rebuild, redeploying generate-shipped-card with the gap still open silently flipped verify_jwt back on, exactly the failure mode this item warned about - caught immediately via a 401 test call and fixed with --no-verify-jwt before the config fix landed properly.
+What: Every edge function (process-entry, assess-ai-level, transcribe-audio, text-to-speech, generate-shipped-card, create-workspace, join-workspace, receipts-mcp, process-transcript) runs with verify_jwt disabled - now via config.toml in whichever repo deploys it, not a bare CLI flag. Functions that need to know the caller manually call supabase.auth.getUser(token) with the service role client.
+Why it's debt: Manual auth verification in every function is duplicate code and a place where mistakes can sneak in. If one function forgets to verify, it has unrestricted access. Built-in JWT verification would centralise this. Splitting deploy config across two repos (one per place the code happens to live) is itself a smaller, ongoing version of this debt - it's easy to fix intent-tracking in the repo you're looking at and not realise the other repo's config also matters.
 Why we did it this way: Some functions need to be callable by unauthenticated users (transcribe-audio for the public landing page demo, parts of the OAuth flow). --no-verify-jwt was the simplest path to mixed-auth functions.
-Worth reviewing: Audit each function. Tag which ones genuinely need unauthenticated access and which ones could use built-in verification. Add [functions.X] verify_jwt = false entries to config.toml for the 5 missing functions so intent is tracked in one place instead of split between config.toml and deploy-time memory. For the ones that could use real verification, consider splitting auth-required and auth-not-required into separate functions, or using the verify-jwt header pattern when Supabase SDK supports it cleanly.
-Estimated effort: 30 min to close the config.toml gap; 2-3 hours for the full audit + refactor. Not urgent, but worth doing before we add more edge functions.
+Worth reviewing: The config-tracking gap is closed, but the underlying architecture question isn't: audit each function, tag which ones genuinely need unauthenticated access vs which could use real built-in verification, and consider consolidating edge functions into one repo (or at least one canonical config.toml) so deploy intent isn't split by accident of which repo holds the code. For functions that could use real verification, consider splitting auth-required and auth-not-required into separate functions, or the verify-jwt header pattern when the Supabase SDK supports it cleanly.
+Estimated effort: 2-3 hours for the full audit + refactor. Not urgent, but worth doing before we add more edge functions.
 
 5. search_builds MCP tool filters in Deno code, not in Postgres
 Logged: May 2 2026
@@ -60,22 +60,6 @@ Worth reviewing: Two options:
 	2	Lift shared data (workspace, profile, builds) into a global Context or Zustand store, fetch once on login.
 Estimated effort: 1-3 hours now that the provider exists, down from the original 2-4 hour estimate. Not urgent — polish issue, no functional impact.
 
-8. entries.source column exists in prod with no migration file
-Logged: July 11 2026
-What: entries.source (text, nullable) exists in the live database and is actively used - values 'app' (Receipts UI writes), 'mcp' (MCP tool writes), and null (pre-July entries, deliberately never backfilled). It does not appear in any file under supabase/migrations/. It was added directly against prod, most likely via the Management API workaround described in item 2, and never captured in a migration file for the record.
-Why it's debt: Anyone reading supabase/migrations/ to understand the schema will not find this column. Anyone rebuilding the database from migrations alone (a fresh Supabase project, a disaster-recovery scenario) will be missing it, and every frontend insert and the human-involvement badge feature will silently break.
-Workaround: None needed for day-to-day work - the column is live and stable. This is purely a documentation/reproducibility gap.
-Proper fix: Write a migration file (e.g. supabase/migrations/20260711_entries_source.sql) with ALTER TABLE entries ADD COLUMN IF NOT EXISTS source text; so the column is captured for the record, matching the pattern already used for the summary column in item 2's history. Since the column already exists in prod, this migration will need to be reconciled the same way (documented but not re-run, or run with IF NOT EXISTS as a no-op).
-Estimated effort: 15 min.
-
-9. log_transcript's source param has nowhere real to live
-Logged: July 11 2026
-What: The transcripts table has no source column (see supabase/migrations/20260630_transcripts.sql). The MCP log_transcript tool accepts an optional source param (fireflies/otter/voice/pasted) and, since there's no column to put it in, prepends it to suggested_tags as a source:<value> string instead.
-Why it's debt: Source ends up mixed into a field meant for topic tags. Any UI or query that treats suggested_tags as pure topic data will need to know to filter out or specially handle a source:* entry. It also means source isn't queryable/filterable the way entries.source is.
-Why we did it this way: Avoided a schema migration (see item 2 - db push is broken) for a single-session feature add.
-Worth reviewing: Add a real source column to transcripts (same text/nullable shape as entries.source) via a migration, move the value there instead of into suggested_tags, and strip the source:* convention out of log_transcript's insert once the frontend/any readers of suggested_tags have been checked for reliance on it.
-Estimated effort: 30 min for the migration + tool update, plus time to confirm nothing reads suggested_tags expecting it to be tag-only.
-
 Investigations (not yet understood)
 
 7. MCP log_entry project_id gate bypassed via Claude context caching
@@ -91,6 +75,14 @@ Estimated effort: Unknown — depends on investigation outcome. Must fix before 
 
 Recently fixed (kept here briefly for memory, then deleted)
 Move items here when fixed; delete after a couple of weeks.
+
+### entries.source column exists in prod with no migration file (was item 8)
+*Fixed: July 12 2026*
+Captured in supabase/migrations/20260712_involvement_state.sql as ADD COLUMN IF NOT EXISTS (no-op against prod), alongside the new involvement_state columns. Applied via db query --linked (item 2 still open, migration file kept for the record).
+
+### log_transcript's source param has nowhere real to live (was item 9)
+*Fixed: July 12 2026*
+transcripts.source column added in 20260712_involvement_state.sql. log_transcript now writes source there instead of prepending source:* to suggested_tags. Verified before removing the convention: zero prod transcripts had a source:* tag and nothing in either repo read it. The migration includes a data-move for source:* tags anyway, in case any had existed.
 
 ### OAuth proxy strong-consistency KV read
 *Fixed: June 14 2026*
