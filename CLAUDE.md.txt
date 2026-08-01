@@ -142,6 +142,23 @@ Working features:
     portfolio_visible flag, private/public curation - deferred pending more
     format feedback.
 
+### Profile pages - private vs public (added Aug 2026)
+- /profile - private, owner-only view. Renders inside the same Layout/dashboard
+  shell as /record, /log, /ideas, /collaborate. Always has nav back into the
+  workspace.
+- /p/:user_id - public shareable link. No sidebar, no backlinks, viewable by
+  anyone (including anonymous visitors). Both routes render the same
+  PublicProfile.tsx component; /profile falls back to the logged-in user's id
+  via useAuth() when no :user_id param is present.
+- Content parity: today both surfaces show identical content - no filtering.
+  Future: /p/:user_id will filter to only cards explicitly marked "shared to
+  public profile"; /profile will remain unfiltered (owner always sees
+  everything). profile_public boolean is not currently gating anything on
+  either route - if you find it checked somewhere, it's dead logic from an
+  earlier assumption, safe to remove.
+- Backlog item "Public profile URL for sharing (/p/:username or similar)" is
+  now DONE - was built as part of the /profile shell fix, not a separate build.
+
 Known issues:
 - generate-shipped-card workspace_feed auto-insert still failing silently
   (manual SQL workaround in place — needs investigating)
@@ -671,7 +688,8 @@ MCP OAuth is live. Remaining MCP items:
 Sprint 5 backlog:
 - ⬜ Fix generate-shipped-card workspace_feed auto-insert
   (currently failing silently — manual SQL workaround in place)
-- ⬜ Public profile URL for sharing (/p/:username or similar)
+- ✅ Public profile URL for sharing (/p/:username or similar) - DONE Aug 2026,
+  see "Profile pages - private vs public" above
 - ⬜ Mobile optimisation (BuildLog card layout fixed April 22 2026)
 - ⬜ Clickable project page with full entry analysis
 - ⬜ Gamification: points, badges, leaderboard (designed above, not yet built)
@@ -681,7 +699,6 @@ Sprint 5 backlog:
 ### Product
 - Layered shipped card: keep current glanceable front (goal, key_wins, one_line_learning, tools_used) and add expandable journey timeline showing chronological entries below
 - Generate-shipped-card narrative summary — one-paragraph "story of this build" rendered between the glanceable card and the full journey
-- Public profile URL for sharing (/p/:username or similar)
 - Fix generate-shipped-card workspace_feed auto-insert (currently failing silently — manual SQL workaround in place)
 - Mobile optimisation pass (BuildLog card layout fixed April 22 2026, more polish needed)
 - Clickable project page with full entry analysis
