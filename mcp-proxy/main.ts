@@ -159,7 +159,7 @@ function jsonError(status: number, error: string, description?: string): Respons
 
 // ─── Main Handler ─────────────────────────────────────────────────────────────
 
-Deno.serve(async (req: Request): Promise<Response> => {
+async function handleRequest(req: Request, requestId: string): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
@@ -280,7 +280,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const loginUrl = new URL(APP_LOGIN_URL);
     loginUrl.searchParams.set("oauth_redirect", callbackUrl);
 
-    console.log("[authorize] redirecting to login:", loginUrl.toString());
+    console.log("[authorize] redirecting to login");
     return Response.redirect(loginUrl.toString(), 302);
   }
 
@@ -387,7 +387,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     console.log("[token] POST /oauth/token", req.headers.get("content-type"));
 
     const rawBody = await req.text();
-    console.log("[token] raw body:", rawBody);
+    // Never log token request bodies: they contain credentials.
 
     let code: string;
     let code_verifier: string;
@@ -488,12 +488,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const headers = new Headers(req.headers);
   headers.delete("host");
 
+  const upstreamStarted = performance.now();
+  console.log(JSON.stringify({ event: "mcp_upstream_start", request_id: requestId }));
   const upstream = await fetch(SUPABASE_MCP, {
     method: req.method,
     headers,
     body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
   });
 
+  console.log(JSON.stringify({ event: "mcp_upstream_response", request_id: requestId, status: upstream.status, duration_ms: Math.round(performance.now() - upstreamStarted) }));
   const responseHeaders = new Headers(upstream.headers);
   for (const [k, v] of Object.entries(corsHeaders)) {
     responseHeaders.set(k, v);
@@ -507,4 +510,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
     status: upstream.status,
     headers: responseHeaders,
   });
+}
+
+// Diagnostics intentionally omit query strings, headers, bodies, and exception messages.
+Deno.serve(async (req: Request): Promise<Response> => {
+  const requestId = crypto.randomUUID();
+  const started = performance.now();
+  const pathname = new URL(req.url).pathname;
+  const knownPaths = new Set([
+    "/", "/mcp", "/sse", "/favicon.ico", "/favicon.png",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration",
+    "/oauth/register", "/oauth/authorize", "/oauth/callback", "/oauth/approve", "/oauth/token",
+  ]);
+  const context = { request_id: requestId, method: req.method, path: knownPaths.has(pathname) ? pathname : "[other]" };
+  console.log(JSON.stringify({ event: "request_start", ...context }));
+  try {
+    const response = await handleRequest(req, requestId);
+    console.log(JSON.stringify({ event: "request_response", ...context, status: response.status, duration_ms: Math.round(performance.now() - started) }));
+    return response;
+  } catch {
+    console.error(JSON.stringify({ event: "request_error", ...context, duration_ms: Math.round(performance.now() - started) }));
+    return Response.json({ error: "server_error", request_id: requestId }, { status: 500, headers: corsHeaders });
+  }
 });
