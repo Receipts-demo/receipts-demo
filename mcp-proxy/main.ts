@@ -1,5 +1,7 @@
 /// <reference lib="deno.unstable" />
 
+import { proxyResponseHeaders } from "./response-headers.ts";
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const SUPABASE_URL = "https://kxkynhbulfxkibwmwrwl.supabase.co";
@@ -497,7 +499,7 @@ async function handleRequest(req: Request, requestId: string): Promise<Response>
   });
 
   console.log(JSON.stringify({ event: "mcp_upstream_response", request_id: requestId, status: upstream.status, duration_ms: Math.round(performance.now() - upstreamStarted) }));
-  const responseHeaders = new Headers(upstream.headers);
+  const responseHeaders = proxyResponseHeaders(upstream.headers);
   for (const [k, v] of Object.entries(corsHeaders)) {
     responseHeaders.set(k, v);
   }
