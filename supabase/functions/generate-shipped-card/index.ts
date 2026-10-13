@@ -12,9 +12,21 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const token = req.headers.get("Authorization")?.match(/^Bearer (.+)$/i)?.[1];
+  if (!token) {
+    return new Response(JSON.stringify({ error: "Please sign in again." }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   try {
     const { project_id } = await req.json();
-    if (!project_id) {
+    if (typeof project_id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(project_id)) {
       return new Response(JSON.stringify({ error: "project_id is required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -22,23 +34,33 @@ serve(async (req) => {
     }
 
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured");
+
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error("Supabase env vars not configured");
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { data: auth, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !auth.user) {
+      return new Response(JSON.stringify({ error: "Please sign in again." }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Fetch project
     const { data: project, error: projectError } = await supabase
       .from("projects")
       .select("id, name, goal, status, created_at, owner_id, shipped_at")
       .eq("id", project_id)
+      .eq("owner_id", auth.user.id)
       .single();
 
     if (projectError || !project) {
-      throw new Error(`Project not found: ${projectError?.message}`);
+      return new Response(JSON.stringify({ error: "Build not found." }), {
+        status: projectError && projectError.code !== "PGRST116" ? 503 : 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Fetch display_name for attribution line in copy_prompt
@@ -50,11 +72,14 @@ serve(async (req) => {
 
     const displayName = builderProfile?.display_name ?? "A Receipts builder";
 
+    if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured");
+
     // Fetch all entries for the project
     const { data: entries, error: entriesError } = await supabase
       .from("entries")
       .select("raw_transcript, claim, entry_type, tool_tags, recorded_at")
       .eq("project_id", project_id)
+      .eq("owner_id", auth.user.id)
       .order("recorded_at", { ascending: true });
 
     if (entriesError) throw new Error(`Entries fetch failed: ${entriesError.message}`);
@@ -212,6 +237,7 @@ Return ONLY valid JSON:
         status: "Shipped",
       })
       .eq("id", project_id)
+      .eq("owner_id", auth.user.id)
       .select()
       .single();
 
