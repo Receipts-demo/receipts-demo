@@ -276,8 +276,8 @@ Trigger phrases: "copy this build", "I want to build something like X",
 "how did X build Y", "replicate build X", "use X as a template",
 "start from the same approach as X".
 
-No ownership filter - any build can be copied by any workspace member.
-This is intentional: copying is how knowledge spreads through a team.
+During the snack pilot, only the build owner can copy a build.
+Team copying is temporarily unavailable.
 
 After returning the copy prompt, tell the user to paste it into a new
 Claude conversation to start building their version.`,
@@ -510,13 +510,22 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
     }
 
     case "copy_build": {
+      const projectId = args.project_id;
+      if (typeof projectId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) {
+        return "Build not found.";
+      }
+      // Pilot: only owners can copy. Check before reading entries or writing.
+      const owned = await db(
+        `projects?id=eq.${projectId}&owner_id=eq.${userId}&select=id`, "GET"
+      ) as Array<{ id: string }>;
+      if (!owned.length) return "Build not found.";
       const [projects, entries] = await Promise.all([
         db(
-          `projects?id=eq.${args.project_id as string}&select=id,name,goal,key_wins,one_line_learning,tools_used`,
+          `projects?id=eq.${projectId}&owner_id=eq.${userId}&select=id,name,goal,key_wins,one_line_learning,tools_used`,
           "GET"
         ) as Promise<Array<{ id: string; name: string; goal: string; key_wins: string[] | null; one_line_learning: string | null; tools_used: string[] | null }>>,
         db(
-          `entries?project_id=eq.${args.project_id as string}&select=claim,entry_type,created_at&order=created_at.asc`,
+          `entries?project_id=eq.${projectId}&owner_id=eq.${userId}&select=claim,entry_type,created_at&order=created_at.asc`,
           "GET"
         ) as Promise<Array<{ claim: string; entry_type: string | null; created_at: string }>>,
       ]);
@@ -542,7 +551,7 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
       // Save prompt back to projects table so the shipped card UI can display it
       try {
         await db(
-          `projects?id=eq.${args.project_id as string}`,
+          `projects?id=eq.${projectId}&owner_id=eq.${userId}`,
           "PATCH",
           { copy_prompt: claudePrompt }
         );
